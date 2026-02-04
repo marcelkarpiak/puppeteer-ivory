@@ -16,7 +16,15 @@ const {
 puppeteer.use(StealthPlugin());
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://xyz.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'xyz';
+
+// Preferuj SERVICE_ROLE_KEY dla botów (omija RLS), fallback na inne klucze
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SUPABASE_KEY = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY || 'xyz';
+
+if (!SUPABASE_SERVICE_KEY) {
+    console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY nie ustawiony - używam ANON_KEY (może nie działać z RLS)');
+}
 
 // 🆕 Account manager dla multi-account
 const accountManager = new AccountManager();

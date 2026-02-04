@@ -4,10 +4,10 @@ import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { 
-  Play, 
-  Square, 
-  Search, 
+import {
+  Play,
+  Square,
+  Search,
   Camera,
   AlertCircle,
   CheckCircle2,
@@ -27,7 +27,7 @@ export default function BotControl() {
               <Search className="w-5 h-5 text-blue-600" />
               <CardTitle>Scanner Bot</CardTitle>
             </div>
-            <Badge 
+            <Badge
               variant={scannerStatus === 'running' ? 'default' : 'secondary'}
               className={scannerStatus === 'running' ? 'bg-green-500' : ''}
             >
@@ -81,7 +81,7 @@ export default function BotControl() {
             </code>
           </div>
 
-          <Button 
+          <Button
             className="w-full"
             variant={scannerStatus === 'running' ? 'destructive' : 'default'}
             onClick={() => setScannerStatus(scannerStatus === 'running' ? 'stopped' : 'running')}
@@ -109,7 +109,7 @@ export default function BotControl() {
               <Camera className="w-5 h-5 text-purple-600" />
               <CardTitle>Screenshot Bot</CardTitle>
             </div>
-            <Badge 
+            <Badge
               variant={screenshotStatus === 'running' ? 'default' : 'secondary'}
               className={screenshotStatus === 'running' ? 'bg-green-500' : ''}
             >
@@ -148,7 +148,7 @@ export default function BotControl() {
             <ol className="text-sm space-y-1 text-muted-foreground">
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 mt-0.5 text-green-600" />
-                Pobiera posty ze statusem "new"
+                Pobiera posty ze statusem &quot;new&quot;
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 mt-0.5 text-green-600" />
@@ -160,7 +160,7 @@ export default function BotControl() {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 mt-0.5 text-green-600" />
-                Aktualizuje status na "done"
+                Aktualizuje status na &quot;done&quot;
               </li>
             </ol>
           </div>
@@ -175,7 +175,7 @@ export default function BotControl() {
             </code>
           </div>
 
-          <Button 
+          <Button
             className="w-full"
             variant={screenshotStatus === 'running' ? 'destructive' : 'default'}
             onClick={() => setScreenshotStatus(screenshotStatus === 'running' ? 'stopped' : 'running')}
@@ -220,12 +220,12 @@ export default function BotControl() {
                 Upewnij się, że plik .env zawiera:
               </p>
               <code className="block bg-muted p-2 rounded text-xs">
-                SUPABASE_URL=...<br/>
+                SUPABASE_URL=...<br />
                 SUPABASE_KEY=...
               </code>
             </div>
           </div>
-          
+
           <div>
             <h4 className="font-semibold mb-2">3. Uruchomienie botów</h4>
             <p className="text-sm text-muted-foreground mb-2">
@@ -233,17 +233,17 @@ export default function BotControl() {
             </p>
             <div className="grid md:grid-cols-2 gap-2">
               <code className="block bg-black text-green-400 p-3 rounded text-xs font-mono">
-                # Terminal 1<br/>
+                # Terminal 1<br />
                 node fb-scanner-bot.js
               </code>
               <code className="block bg-black text-green-400 p-3 rounded text-xs font-mono">
-                # Terminal 2<br/>
+                # Terminal 2<br />
                 node fb-screenshot-bot.js
               </code>
             </div>
           </div>
         </CardContent>
       </Card>
-    </div>
+    </div >
   )
 }

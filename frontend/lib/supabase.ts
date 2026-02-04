@@ -19,3 +19,14 @@ export type Post = {
   scraped_at: string
   human_action_taken: boolean
 }
+
+export type Alert = {
+  id: string
+  user_id: string
+  type: 'checkpoint' | 'error' | 'no_activity' | 'bot_offline'
+  message: string
+  metadata: Record<string, any>
+  status: 'new' | 'reviewed' | 'resolved'
+  created_at: string
+  resolved_at: string | null
+}

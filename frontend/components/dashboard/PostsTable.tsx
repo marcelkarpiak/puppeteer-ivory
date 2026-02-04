@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase, type Post } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-browser'
+import { type Post } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { 
+import {
   Table,
   TableBody,
   TableCell,
@@ -20,51 +21,74 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { 
-  CheckCircle2, 
-  XCircle, 
-  Eye, 
+import {
+  CheckCircle2,
+  XCircle,
+  Eye,
   ExternalLink,
   RefreshCw,
   User,
   Calendar,
-  Tag
+  Tag,
+  Copy,
+  RotateCcw
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { pl } from 'date-fns/locale'
+import { toast } from 'sonner'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface PostsTableProps {
   posts: Post[]
+  categories?: { id: string; name: string; color: string }[]
   loading: boolean
   onRefresh: () => void
 }
 
-export default function PostsTable({ posts, loading, onRefresh }: PostsTableProps) {
+export default function PostsTable({ posts, categories = [], loading, onRefresh }: PostsTableProps) {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
+  const supabase = createClient()
 
   const updatePostStatus = async (postId: string, status: Post['status']) => {
     setUpdating(postId)
     try {
       const { error } = await supabase
         .from('posts')
-        .update({ 
+        .update({
           status,
-          human_action_taken: true 
+          human_action_taken: true
         })
         .eq('id', postId)
 
       if (error) throw error
       onRefresh()
+      toast.success('Status zaktualizowany')
     } catch (error) {
       console.error('Error updating post:', error)
+      toast.error('Błąd aktualizacji statusu')
     } finally {
       setUpdating(null)
     }
   }
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success('Link skopiowany do schowka')
+  }
+
+  const getCategoryColor = (categoryName: string) => {
+    const category = categories.find(c => c.name.toLowerCase() === categoryName.toLowerCase())
+    return category?.color || '#94a3b8' // default slate-400
+  }
+
   const getStatusBadge = (status: Post['status']) => {
-    const variants: Record<Post['status'], { variant: any; label: string; className?: string }> = {
+    const variants: Record<Post['status'], { variant: "default" | "secondary" | "destructive" | "outline"; label: string; className?: string }> = {
       new: { variant: 'secondary', label: 'Nowy' },
       processing: { variant: 'default', label: 'Przetwarzanie', className: 'bg-blue-500' },
       done: { variant: 'default', label: 'Gotowy', className: 'bg-green-500' },
@@ -136,9 +160,9 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                         <div>
                           <p className="font-medium text-sm">{post.author_name}</p>
                           {post.author_url && (
-                            <a 
-                              href={post.author_url} 
-                              target="_blank" 
+                            <a
+                              href={post.author_url}
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                             >
@@ -151,7 +175,7 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                     <TableCell className="max-w-md">
                       <p className="truncate text-sm">{post.content}</p>
                       <div className="flex gap-1 mt-1 flex-wrap">
-                        {post.matched_keywords?.slice(0, 3).map((keyword, idx) => (
+                        {post.matched_keywords?.slice(0, 3).map((keyword: string, idx: number) => (
                           <Badge key={idx} variant="outline" className="text-xs">
                             {keyword}
                           </Badge>
@@ -159,7 +183,11 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="capitalize">
+                      <Badge
+                        variant="secondary"
+                        className="capitalize text-white"
+                        style={{ backgroundColor: getCategoryColor(post.category) }}
+                      >
                         <Tag className="w-3 h-3 mr-1" />
                         {post.category}
                       </Badge>
@@ -167,14 +195,31 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                     <TableCell>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Calendar className="w-3 h-3" />
-                        {formatDistanceToNow(new Date(post.scraped_at), { 
+                        {formatDistanceToNow(new Date(post.scraped_at), {
                           addSuffix: true,
-                          locale: pl 
+                          locale: pl
                         })}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-2 justify-end">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                onClick={() => copyToClipboard(post.post_url)}
+                                variant="ghost"
+                                size="sm"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Kopiuj link</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
                         <Button
                           onClick={() => setSelectedPost(post)}
                           variant="outline"
@@ -182,6 +227,27 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
+
+                        {(post.status === 'processed' || post.status === 'rejected') && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  onClick={() => updatePostStatus(post.id, 'done')}
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={updating === post.id}
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Przywróć do gotowych</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+
                         {post.status === 'done' && (
                           <>
                             <Button
@@ -221,7 +287,7 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
               Autor: {selectedPost?.author_name} • {selectedPost?.category}
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedPost && (
             <div className="space-y-4">
               <div>
@@ -234,7 +300,7 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
               <div>
                 <h4 className="font-semibold mb-2">Słowa kluczowe:</h4>
                 <div className="flex gap-2 flex-wrap">
-                  {selectedPost.matched_keywords?.map((keyword, idx) => (
+                  {selectedPost.matched_keywords?.map((keyword: string, idx: number) => (
                     <Badge key={idx} variant="secondary">
                       {keyword}
                     </Badge>
@@ -245,15 +311,26 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
               {selectedPost.screenshot_url && (
                 <div>
                   <h4 className="font-semibold mb-2">Screenshot:</h4>
-                  <img 
-                    src={selectedPost.screenshot_url} 
-                    alt="Post screenshot"
-                    className="w-full rounded-lg border"
-                  />
+                  <div className="relative w-full h-[400px]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={selectedPost.screenshot_url}
+                      alt="Post screenshot"
+                      className="w-full h-full object-contain rounded-lg border"
+                    />
+                  </div>
                 </div>
               )}
 
               <div className="flex gap-2">
+                <Button
+                  onClick={() => copyToClipboard(selectedPost.post_url)}
+                  variant="outline"
+                  className="flex-none px-3"
+                  title="Kopiuj link"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
                 <Button
                   onClick={() => window.open(selectedPost.post_url, '_blank')}
                   variant="outline"
@@ -286,6 +363,19 @@ export default function PostsTable({ posts, loading, onRefresh }: PostsTableProp
                       Odrzuć
                     </Button>
                   </>
+                )}
+                {(selectedPost.status === 'processed' || selectedPost.status === 'rejected') && (
+                  <Button
+                    onClick={() => {
+                      updatePostStatus(selectedPost.id, 'done')
+                      setSelectedPost(null)
+                    }}
+                    variant="ghost"
+                    className="flex-1 border"
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Przywróć
+                  </Button>
                 )}
               </div>
             </div>
