@@ -3,14 +3,17 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { type Post } from '@/lib/supabase'
 import { CardContent, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Activity,
   Camera,
-  LayoutList
+  LayoutList,
+  Eye
 } from 'lucide-react'
 import PostsTable from './dashboard/PostsTable'
 import BotControl from './dashboard/BotControl'
@@ -30,7 +33,8 @@ export default function Dashboard() {
     successRate: 0,
     topGroups: [] as { name: string, count: number }[]
   })
-  const { supabase } = useAuth()
+  const { supabase, isAdmin } = useAuth()
+  const { selectedUserId, selectedUser, isManagingOtherUser } = useAdminContext()
   const searchParams = useSearchParams()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +43,15 @@ export default function Dashboard() {
   const [groups, setGroups] = useState<any[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [keywords, setKeywords] = useState<any[]>([])
+
+  // Helper: apply user_id filter when admin has selected a specific user
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyUserFilter = useCallback((query: any) => {
+    if (isAdmin && selectedUserId) {
+      return query.eq('user_id', selectedUserId)
+    }
+    return query
+  }, [isAdmin, selectedUserId])
 
   const fetchPosts = useCallback(async () => {
     if (!supabase) return
@@ -49,6 +62,9 @@ export default function Dashboard() {
       let query = supabase
         .from('posts')
         .select('*')
+
+      // Admin user filter
+      query = applyUserFilter(query)
 
       // Filters
       const statusParam = searchParams.get('status')
@@ -99,11 +115,11 @@ export default function Dashboard() {
 
       if (postsError) throw postsError
 
-      // Fetch metadata
+      // Fetch metadata (filtered by selected user if admin)
       const [categoriesRes, groupsRes, keywordsRes] = await Promise.all([
-        supabase.from('categories').select('*'),
-        supabase.from('groups').select('id, name'),
-        supabase.from('keywords').select('*')
+        applyUserFilter(supabase.from('categories').select('*')),
+        applyUserFilter(supabase.from('groups').select('id, name')),
+        applyUserFilter(supabase.from('keywords').select('*'))
       ])
 
       if (categoriesRes.error) console.error('Error fetching categories:', categoriesRes.error)
@@ -133,14 +149,14 @@ export default function Dashboard() {
         today: 0
       }
 
-      // Parallelize count requests
+      // Parallelize count requests (filtered by selected user if admin)
       const [totalRes, doneRes, processingRes, errorRes, processedRes, todayRes] = await Promise.all([
-        supabase.from('posts').select('*', { count: 'exact', head: true }),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'done'),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'error'),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'processed'),
-        supabase.from('posts').select('*', { count: 'exact', head: true }).gte('scraped_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true })),
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'done')),
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'processing')),
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'error')),
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'processed')),
+        applyUserFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).gte('scraped_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()))
       ])
 
       statusCounts.total = totalRes.count || 0
@@ -161,10 +177,12 @@ export default function Dashboard() {
       // Since we can't easily GROUP BY, we'll fetch today's posts (we already did head=true, now we need data for aggregation)
       // But we shouldn't fetch potentially thousands of rows just for this.
       // Optimization: Fetch only group_id for today's posts.
-      const { data: todayPostsIds } = await supabase
-        .from('posts')
-        .select('group_id')
-        .gte('scraped_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+      const { data: todayPostsIds } = await applyUserFilter(
+        supabase
+          .from('posts')
+          .select('group_id')
+          .gte('scraped_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+      )
 
       const groupCounts: Record<string, number> = {}
       todayPostsIds?.forEach((p: any) => {
@@ -189,10 +207,28 @@ export default function Dashboard() {
 
     } catch (error) {
       console.error('Error fetching data:', error)
+      throw error // Throw for retry
     } finally {
       setLoading(false)
     }
-  }, [supabase, searchParams])
+  }, [supabase, searchParams, applyUserFilter])
+
+  const fetchPostsWithRetry = useCallback(async (retries = 3, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await fetchPosts()
+        return
+      } catch (error) {
+        console.error(`[Dashboard] Attempt ${i + 1} failed:`, error)
+        if (i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay * (i + 1)))
+        } else {
+          // Sonaer toast handles unique IDs so multiple calls won't spam
+          // But let's just log or show one generic error
+        }
+      }
+    }
+  }, [fetchPosts])
 
   const handleExport = async () => {
     if (!supabase) return
@@ -200,6 +236,9 @@ export default function Dashboard() {
     try {
       // Re-fetch ALL filtered data (not just page limit) for export
       let query = supabase.from('posts').select('*')
+
+      // Admin user filter
+      query = applyUserFilter(query)
 
       // Apply same filters as main query
       const statusParam = searchParams.get('status')
@@ -264,7 +303,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetchPosts()
+    fetchPostsWithRetry()
 
     if (!supabase) return
 
@@ -276,7 +315,7 @@ export default function Dashboard() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (payload: any) => {
           console.log('Realtime update:', payload)
-          fetchPosts()
+          fetchPostsWithRetry()
         }
       )
       .subscribe()
@@ -284,7 +323,7 @@ export default function Dashboard() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, fetchPosts])
+  }, [supabase, fetchPostsWithRetry])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
@@ -303,6 +342,24 @@ export default function Dashboard() {
             Live
           </Badge>
         </div>
+
+        {isManagingOtherUser && selectedUser && (
+          <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
+            <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            <AlertDescription className="text-blue-800 dark:text-blue-200">
+              Przeglądasz dane użytkownika: <strong>{selectedUser.display_name || selectedUser.email}</strong>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {isAdmin && !selectedUserId && (
+          <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+            <Eye className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <AlertDescription className="text-amber-800 dark:text-amber-200">
+              Wyświetlasz dane wszystkich użytkowników. Wybierz użytkownika w selektorze, aby filtrować.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <StatsCards stats={stats} />
 
@@ -330,7 +387,7 @@ export default function Dashboard() {
               posts={posts}
               categories={categories}
               loading={loading}
-              onRefresh={fetchPosts}
+              onRefresh={() => fetchPostsWithRetry()}
             />
           </TabsContent>
 

@@ -24,6 +24,7 @@ interface CategoryFormProps {
   onOpenChange: (open: boolean) => void
   category: Category | null
   onSuccess: () => void
+  targetUserId?: string
 }
 
 const PRESET_COLORS = [
@@ -43,7 +44,8 @@ export default function CategoryForm({
   open,
   onOpenChange,
   category,
-  onSuccess
+  onSuccess,
+  targetUserId
 }: CategoryFormProps) {
   const [name, setName] = useState('')
   const [color, setColor] = useState('#3B82F6')
@@ -97,7 +99,7 @@ export default function CategoryForm({
         const { error } = await supabase
           .from('categories')
           .insert({
-            user_id: user.id,
+            user_id: targetUserId || user.id,
             name: name.trim(),
             color,
             is_default: isDefault
@@ -158,8 +160,8 @@ export default function CategoryForm({
                     type="button"
                     onClick={() => setColor(presetColor)}
                     className={`w-8 h-8 rounded-full border-2 transition-all ${color === presetColor
-                        ? 'border-gray-900 dark:border-white scale-110 shadow-lg'
-                        : 'border-transparent hover:scale-105'
+                      ? 'border-gray-900 dark:border-white scale-110 shadow-lg'
+                      : 'border-transparent hover:scale-105'
                       }`}
                     style={{ backgroundColor: presetColor }}
                     title={presetColor}

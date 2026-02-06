@@ -195,8 +195,7 @@ export default function CategoriesTable({
                           variant="ghost"
                           size="sm"
                           className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          disabled={category.is_default}
-                          title={category.is_default ? 'Nie można usunąć domyślnej kategorii' : 'Usuń kategorię'}
+                          title="Usuń kategorię"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -216,7 +215,8 @@ export default function CategoriesTable({
             <DialogTitle>Potwierdź usunięcie</DialogTitle>
             <DialogDescription>
               Czy na pewno chcesz usunąć kategorię <strong>{categoryToDelete?.name}</strong>?
-              Ta operacja jest nieodwracalna.
+              {categoryToDelete?.is_default && ' Jest to kategoria domyślna.'}
+              {' '}Ta operacja jest nieodwracalna. Grupy i słowa kluczowe przypisane do tej kategorii stracą przypisanie.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

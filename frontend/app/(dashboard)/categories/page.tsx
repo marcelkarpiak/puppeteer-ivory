@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plus, FolderOpen, Activity } from 'lucide-react'
@@ -16,6 +17,7 @@ export default function CategoriesPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const { user, isAdmin, loading: authLoading, supabase } = useAuth()
+  const { selectedUserId } = useAdminContext()
   const router = useRouter()
 
   useEffect(() => {
@@ -31,46 +33,76 @@ export default function CategoriesPage() {
     setLoading(true)
     try {
       // Pobierz kategorie z licznikami grup i słów kluczowych
-      const { data: categoriesData, error: categoriesError } = await supabase
+      let categoriesQuery = supabase
         .from('categories')
         .select('*')
         .order('created_at', { ascending: true })
 
+      if (selectedUserId) {
+        categoriesQuery = categoriesQuery.eq('user_id', selectedUserId)
+      }
+
+      const { data: categoriesData, error: categoriesError } = await categoriesQuery
+
       if (categoriesError) throw categoriesError
 
       // Pobierz liczbę grup dla każdej kategorii
-      const { data: groupsCount } = await supabase
+      let groupsQuery = supabase
         .from('groups')
         .select('category_id')
+      if (selectedUserId) {
+        groupsQuery = groupsQuery.eq('user_id', selectedUserId)
+      }
+      const { data: groupsCount } = await groupsQuery
 
       // Pobierz liczbę słów kluczowych dla każdej kategorii
-      const { data: keywordsCount } = await supabase
+      let keywordsQuery = supabase
         .from('keywords')
         .select('category_id')
+      if (selectedUserId) {
+        keywordsQuery = keywordsQuery.eq('user_id', selectedUserId)
+      }
+      const { data: keywordsCount } = await keywordsQuery
 
       // Połącz dane
-      const categoriesWithCounts = categoriesData?.map((category: any) => ({
+      const categoriesWithCounts = categoriesData?.map((category) => ({
         ...category,
-        groups_count: groupsCount?.filter((g: any) => g.category_id === category.id).length || 0,
-        keywords_count: keywordsCount?.filter((k: any) => k.category_id === category.id).length || 0
+        groups_count: groupsCount?.filter((g) => g.category_id === category.id).length || 0,
+        keywords_count: keywordsCount?.filter((k) => k.category_id === category.id).length || 0
       })) || []
 
       setCategories(categoriesWithCounts)
     } catch (error) {
       console.error('Error fetching categories:', error)
-      toast.error('Błąd podczas pobierania kategorii')
+      throw error // Throw for retry
     } finally {
       setLoading(false)
     }
-  }, [user?.id, supabase])
+  }, [user?.id, supabase, selectedUserId])
+
+  const fetchCategoriesWithRetry = useCallback(async (retries = 3, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await fetchCategories()
+        return
+      } catch (error) {
+        console.error(`[CategoriesPage] Attempt ${i + 1} failed:`, error)
+        if (i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay * (i + 1)))
+        } else {
+          toast.error('Błąd podczas pobierania kategorii')
+        }
+      }
+    }
+  }, [fetchCategories])
 
 
 
   useEffect(() => {
     if (user && isAdmin) {
-      fetchCategories()
+      fetchCategoriesWithRetry()
     }
-  }, [user?.id, isAdmin, fetchCategories])
+  }, [user?.id, isAdmin, fetchCategoriesWithRetry, selectedUserId])
 
   const handleEdit = (category: Category) => {
     setEditingCategory(category)
@@ -83,7 +115,7 @@ export default function CategoriesPage() {
   }
 
   const handleFormSuccess = () => {
-    fetchCategories()
+    fetchCategoriesWithRetry()
     setFormOpen(false)
     setEditingCategory(null)
   }
@@ -138,7 +170,7 @@ export default function CategoriesPage() {
         <CategoriesTable
           categories={categories}
           loading={loading}
-          onRefresh={fetchCategories}
+          onRefresh={() => fetchCategoriesWithRetry()}
           onEdit={handleEdit}
         />
 
@@ -147,6 +179,7 @@ export default function CategoriesPage() {
           onOpenChange={handleFormOpenChange}
           category={editingCategory}
           onSuccess={handleFormSuccess}
+          targetUserId={selectedUserId || undefined}
         />
       </div>
     </div>

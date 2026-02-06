@@ -47,7 +47,20 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(new URL('/', request.url))
     }
 
-    // TODO: Sprawdzanie roli admina dla /admin routes (wymaga pobrania profilu)
+    // Sprawdzanie roli admina dla /admin/* i /categories (admin-only)
+    const adminOnlyPaths = ['/admin', '/categories']
+    const isAdminRoute = adminOnlyPaths.some(path => request.nextUrl.pathname.startsWith(path))
+
+    if (user && isAdminRoute) {
+        const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single()
+        if (profile?.role !== 'admin') {
+            return NextResponse.redirect(new URL('/', request.url))
+        }
+    }
 
     return response
 }

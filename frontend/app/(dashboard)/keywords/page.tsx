@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Search, Activity, Upload } from 'lucide-react'
@@ -20,13 +21,11 @@ export default function KeywordsPage() {
     const [bulkImportOpen, setBulkImportOpen] = useState(false)
     const [editingKeyword, setEditingKeyword] = useState<Keyword | null>(null)
     const { user, isAdmin, loading: authLoading, supabase } = useAuth()
+    const { selectedUserId } = useAdminContext()
     const router = useRouter()
 
     useEffect(() => {
-        if (!authLoading && !isAdmin) {
-            router.push('/')
-            toast.error('Brak uprawnień do zarządzania słowami kluczowymi')
-        }
+        // Read-only access for non-admin — no redirect needed
     }, [authLoading, isAdmin, router])
 
     const fetchData = useCallback(async () => {
@@ -35,10 +34,16 @@ export default function KeywordsPage() {
         setLoading(true)
         try {
             // 1. Pobierz słowa kluczowe
-            const { data: keywordsData, error: keywordsError } = await supabase
+            let query = supabase
                 .from('keywords')
                 .select('*')
                 .order('created_at', { ascending: false })
+
+            if (selectedUserId) {
+                query = query.eq('user_id', selectedUserId)
+            }
+
+            const { data: keywordsData, error: keywordsError } = await query
 
             if (keywordsError) throw keywordsError
 
@@ -58,17 +63,18 @@ export default function KeywordsPage() {
         } finally {
             setLoading(false)
         }
-    }, [user?.id, supabase])
+    }, [user?.id, supabase, selectedUserId])
 
 
 
     useEffect(() => {
-        if (user && isAdmin) {
+        if (user) {
             fetchData()
         }
-    }, [user?.id, isAdmin, fetchData])
+    }, [user?.id, isAdmin, fetchData, selectedUserId])
 
     const handleEdit = (keyword: Keyword) => {
+        if (!isAdmin) return
         setEditingKeyword(keyword)
         setFormOpen(true)
     }
@@ -103,10 +109,6 @@ export default function KeywordsPage() {
         )
     }
 
-    if (!isAdmin) {
-        return null
-    }
-
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
             <div className="container mx-auto p-6 space-y-6">
@@ -116,7 +118,10 @@ export default function KeywordsPage() {
                             Słowa kluczowe
                         </h1>
                         <p className="text-muted-foreground mt-2">
-                            Definiuj frazy, które bot scanner ma wykrywać w postach
+                            {isAdmin
+                                ? "Definiuj frazy, które bot scanner ma wykrywać w postach"
+                                : "Przeglądaj słowa kluczowe monitorowane przez bota"
+                            }
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -124,14 +129,18 @@ export default function KeywordsPage() {
                             <Search className="w-4 h-4 mr-2" />
                             {keywords.length} słów
                         </Badge>
-                        <Button variant="outline" onClick={() => setBulkImportOpen(true)}>
-                            <Upload className="w-4 h-4 mr-2" />
-                            Importuj wiele
-                        </Button>
-                        <Button onClick={handleAddNew}>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Nowe słowo
-                        </Button>
+                        {isAdmin && (
+                            <>
+                                <Button variant="outline" onClick={() => setBulkImportOpen(true)}>
+                                    <Upload className="w-4 h-4 mr-2" />
+                                    Importuj wiele
+                                </Button>
+                                <Button onClick={handleAddNew}>
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Nowe słowo
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -141,22 +150,29 @@ export default function KeywordsPage() {
                     loading={loading}
                     onRefresh={fetchData}
                     onEdit={handleEdit}
+                    readOnly={!isAdmin}
                 />
 
-                <KeywordForm
-                    open={formOpen}
-                    onOpenChange={handleFormOpenChange}
-                    keyword={editingKeyword}
-                    categories={categories}
-                    onSuccess={handleFormSuccess}
-                />
+                {isAdmin && (
+                    <>
+                        <KeywordForm
+                            open={formOpen}
+                            onOpenChange={handleFormOpenChange}
+                            keyword={editingKeyword}
+                            categories={categories}
+                            onSuccess={handleFormSuccess}
+                            targetUserId={selectedUserId || undefined}
+                        />
 
-                <KeywordsBulkImport
-                    open={bulkImportOpen}
-                    onOpenChange={setBulkImportOpen}
-                    categories={categories}
-                    onSuccess={fetchData}
-                />
+                        <KeywordsBulkImport
+                            open={bulkImportOpen}
+                            onOpenChange={setBulkImportOpen}
+                            categories={categories}
+                            onSuccess={fetchData}
+                            targetUserId={selectedUserId || undefined}
+                        />
+                    </>
+                )}
             </div>
         </div>
     )

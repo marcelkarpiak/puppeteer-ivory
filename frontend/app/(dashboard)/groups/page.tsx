@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Users, Activity } from 'lucide-react'
@@ -18,13 +19,11 @@ export default function GroupsPage() {
     const [formOpen, setFormOpen] = useState(false)
     const [editingGroup, setEditingGroup] = useState<Group | null>(null)
     const { user, isAdmin, loading: authLoading, supabase } = useAuth()
+    const { selectedUserId } = useAdminContext()
     const router = useRouter()
 
     useEffect(() => {
-        if (!authLoading && !isAdmin) {
-            router.push('/')
-            toast.error('Brak uprawnień do zarządzania grupami')
-        }
+        // Redirection for non-admin removed to allow read-only access
     }, [authLoading, isAdmin, router])
 
     const fetchData = useCallback(async () => {
@@ -39,17 +38,18 @@ export default function GroupsPage() {
             // 1. Pobierz grupy
             console.log('[GroupsPage] Fetching groups table...')
 
-            // Timeout promise
-            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 10000));
-
-            const groupsRequest = supabase
+            // If admin has selected a user, filter by that user.
+            // If regular user, RLS will automatically restrict to their own groups.
+            let query = supabase
                 .from('groups')
                 .select('*')
                 .order('created_at', { ascending: false })
 
-            // @ts-ignore
-            const { data: groupsData, error: groupsError } = await Promise.race([groupsRequest, timeout])
-                .then((res: any) => res)
+            if (selectedUserId) {
+                query = query.eq('user_id', selectedUserId)
+            }
+
+            const { data: groupsData, error: groupsError } = await query
 
             if (groupsError) throw groupsError
             console.log(`[GroupsPage] Groups fetched: ${groupsData?.length ?? 0}`)
@@ -68,23 +68,42 @@ export default function GroupsPage() {
             setCategories(categoriesData || [])
         } catch (error) {
             console.error('[GroupsPage] Error fetching data:', error)
-            toast.error('Błąd podczas pobierania danych')
+            throw error // Re-throw to be caught by retry logic
         } finally {
             console.log('[GroupsPage] fetchData finally block - setLoading(false)')
             setLoading(false)
         }
-    }, [user?.id, supabase])
+    }, [user?.id, supabase, selectedUserId])
+
+    const fetchDataWithRetry = useCallback(async (retries = 3, delay = 1000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                await fetchData()
+                return // Success
+            } catch (error) {
+                console.error(`[GroupsPage] Attempt ${i + 1} failed:`, error)
+                if (i < retries - 1) {
+                    console.log(`[GroupsPage] Retrying in ${delay}ms...`)
+                    await new Promise(resolve => setTimeout(resolve, delay * (i + 1))) // Exponential backoff-ish
+                } else {
+                    console.error('[GroupsPage] All retries failed')
+                    toast.error('Nie udało się pobrać danych po kilku próbach. Odśwież stronę.')
+                }
+            }
+        }
+    }, [fetchData])
 
 
 
     useEffect(() => {
-        console.log(`[GroupsPage] useEffect triggered. User: ${!!user}, Admin: ${isAdmin}`)
-        if (user && isAdmin) {
-            fetchData()
+        console.log(`[GroupsPage] useEffect triggered. User: ${!!user}, Admin: ${isAdmin}, SelectedUser: ${selectedUserId}`)
+        if (user) {
+            fetchDataWithRetry()
         }
-    }, [user?.id, isAdmin, fetchData])
+    }, [user?.id, isAdmin, fetchDataWithRetry, selectedUserId])
 
     const handleEdit = (group: Group) => {
+        if (!isAdmin) return
         setEditingGroup(group)
         setFormOpen(true)
     }
@@ -119,10 +138,6 @@ export default function GroupsPage() {
         )
     }
 
-    if (!isAdmin) {
-        return null
-    }
-
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
             <div className="container mx-auto p-6 space-y-6">
@@ -132,7 +147,10 @@ export default function GroupsPage() {
                             Grupy Facebook
                         </h1>
                         <p className="text-muted-foreground mt-2">
-                            Zarządzaj monitorowanymi grupami, przypisuj kategorie i śledź statystyki
+                            {isAdmin
+                                ? "Zarządzaj monitorowanymi grupami, przypisuj kategorie i śledź statystyki"
+                                : "Przeglądaj monitorowane grupy i ich status"
+                            }
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -140,10 +158,12 @@ export default function GroupsPage() {
                             <Users className="w-4 h-4 mr-2" />
                             {groups.length} grup
                         </Badge>
-                        <Button onClick={handleAddNew}>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Nowa grupa
-                        </Button>
+                        {isAdmin && (
+                            <Button onClick={handleAddNew}>
+                                <Plus className="w-4 h-4 mr-2" />
+                                Nowa grupa
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -151,17 +171,21 @@ export default function GroupsPage() {
                     groups={groups}
                     categories={categories}
                     loading={loading}
-                    onRefresh={fetchData}
+                    onRefresh={() => fetchDataWithRetry()}
                     onEdit={handleEdit}
+                    readOnly={!isAdmin}
                 />
 
-                <GroupForm
-                    open={formOpen}
-                    onOpenChange={handleFormOpenChange}
-                    group={editingGroup}
-                    categories={categories}
-                    onSuccess={handleFormSuccess}
-                />
+                {isAdmin && (
+                    <GroupForm
+                        open={formOpen}
+                        onOpenChange={handleFormOpenChange}
+                        group={editingGroup}
+                        categories={categories}
+                        onSuccess={handleFormSuccess}
+                        targetUserId={selectedUserId || undefined}
+                    />
+                )}
             </div>
         </div>
     )

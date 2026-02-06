@@ -31,6 +31,7 @@ interface KeywordsBulkImportProps {
     onOpenChange: (open: boolean) => void
     categories: Category[]
     onSuccess: () => void
+    targetUserId?: string
 }
 
 interface ImportResult {
@@ -43,7 +44,8 @@ export default function KeywordsBulkImport({
     open,
     onOpenChange,
     categories,
-    onSuccess
+    onSuccess,
+    targetUserId
 }: KeywordsBulkImportProps) {
     const [text, setText] = useState('')
     const [categoryId, setCategoryId] = useState<string>('none')
@@ -100,7 +102,7 @@ export default function KeywordsBulkImport({
             const { data: existingKeywords } = await supabase
                 .from('keywords')
                 .select('keyword')
-                .eq('user_id', user.id)
+                .eq('user_id', targetUserId || user.id)
 
             const existingSet = new Set(
                 existingKeywords?.map(k => k.keyword.toLowerCase()) || []
@@ -115,7 +117,7 @@ export default function KeywordsBulkImport({
             if (newKeywords.length > 0) {
                 // Przygotuj dane do insertu
                 const insertData = newKeywords.map(keyword => ({
-                    user_id: user.id,
+                    user_id: targetUserId || user.id,
                     keyword,
                     category_id: categoryId === 'none' ? null : categoryId,
                     is_active: true,

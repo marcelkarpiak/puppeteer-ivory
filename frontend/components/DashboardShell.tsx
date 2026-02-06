@@ -6,6 +6,8 @@ import { UserNav } from "@/components/UserNav"
 import { cn } from "@/lib/utils"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/lib/auth-context"
+import { UserSelector } from "@/components/admin/UserSelector"
 
 export default function DashboardShell({
     children,
@@ -13,6 +15,7 @@ export default function DashboardShell({
     children: React.ReactNode
 }) {
     const [collapsed, setCollapsed] = useState(false)
+    const { isAdmin } = useAuth()
 
     return (
         <div className="h-full relative">
@@ -38,6 +41,7 @@ export default function DashboardShell({
             )}>
                 <div className="flex items-center p-4 border-b">
                     <div className="ml-auto flex items-center space-x-4">
+                        {isAdmin && <UserSelector />}
                         <UserNav />
                     </div>
                 </div>

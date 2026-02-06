@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,15 +24,25 @@ interface BotInstance {
 
 export default function BotInstancesTable() {
     const supabase = createClient()
+    const { isAdmin } = useAuth()
+    const { selectedUserId } = useAdminContext()
     const [bots, setBots] = useState<BotInstance[]>([])
     const [loading, setLoading] = useState(true)
 
     const fetchBots = useCallback(async () => {
         setLoading(true)
-        const { data, error } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let query: any = supabase
             .from('bot_instances')
             .select('*')
-            .order('name', { ascending: true })
+
+        if (isAdmin && selectedUserId) {
+            query = query.eq('user_id', selectedUserId)
+        }
+
+        query = query.order('name', { ascending: true })
+
+        const { data, error } = await query
 
         if (error) {
             console.error('Error fetching bots:', error)
@@ -38,7 +50,7 @@ export default function BotInstancesTable() {
             setBots(data || [])
         }
         setLoading(false)
-    }, [supabase])
+    }, [supabase, isAdmin, selectedUserId])
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect

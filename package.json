@@ -4,6 +4,7 @@
   "description": "Demo integracji Puppeteer z n8n - scraper wysyłający dane przez webhook",
   "main": "scraper-with-n8n.js",
   "scripts": {
+    "dev": "npm run dev --prefix frontend",
     "start": "node scraper-with-n8n.js"
   },
   "keywords": [

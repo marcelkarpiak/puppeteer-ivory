@@ -2,39 +2,66 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@/lib/auth-context'
+import { useAdminContext } from '@/lib/admin-context'
 import { type Alert } from '@/lib/supabase'
-import { Activity } from 'lucide-react'
+import { Activity, Eye } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Alert as AlertUI, AlertDescription } from '@/components/ui/alert'
 import AlertsTable from '@/components/dashboard/AlertsTable'
 import { toast } from 'sonner'
 
 export default function AlertsPage() {
     const [alerts, setAlerts] = useState<Alert[]>([])
     const [loading, setLoading] = useState(true)
-    const { supabase, user } = useAuth()
+    const { supabase, user, isAdmin } = useAuth()
+    const { selectedUserId, selectedUser, isManagingOtherUser } = useAdminContext()
 
     const fetchAlerts = useCallback(async () => {
         if (!supabase || !user) return
 
         setLoading(true)
         try {
-            const { data, error } = await supabase
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let query: any = supabase
                 .from('alerts')
                 .select('*')
-                .order('created_at', { ascending: false })
+
+            if (isAdmin && selectedUserId) {
+                query = query.eq('user_id', selectedUserId)
+            }
+
+            query = query.order('created_at', { ascending: false })
+
+            const { data, error } = await query
 
             if (error) throw error
             setAlerts(data || [])
         } catch (error) {
             console.error('Error fetching alerts:', error)
-            toast.error('Błąd pobierania alertów')
+            throw error // Throw for retry logic
         } finally {
             setLoading(false)
         }
-    }, [supabase, user])
+    }, [supabase, user, isAdmin, selectedUserId])
+
+    const fetchAlertsWithRetry = useCallback(async (retries = 3, delay = 1000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                await fetchAlerts()
+                return
+            } catch (error) {
+                console.error(`[AlertsPage] Attempt ${i + 1} failed:`, error)
+                if (i < retries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delay * (i + 1)))
+                } else {
+                    toast.error('Błąd pobierania alertów')
+                }
+            }
+        }
+    }, [fetchAlerts])
 
     useEffect(() => {
-        fetchAlerts()
+        fetchAlertsWithRetry()
 
         if (!supabase) return
 
@@ -44,7 +71,7 @@ export default function AlertsPage() {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'alerts' },
                 () => {
-                    fetchAlerts()
+                    fetchAlertsWithRetry()
                 }
             )
             .subscribe()
@@ -52,7 +79,7 @@ export default function AlertsPage() {
         return () => {
             supabase.removeChannel(channel)
         }
-    }, [supabase, fetchAlerts])
+    }, [supabase, fetchAlertsWithRetry])
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
@@ -68,10 +95,19 @@ export default function AlertsPage() {
                     </div>
                 </div>
 
+                {isManagingOtherUser && selectedUser && (
+                    <AlertUI className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
+                        <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <AlertDescription className="text-blue-800 dark:text-blue-200">
+                            Przeglądasz alerty użytkownika: <strong>{selectedUser.display_name || selectedUser.email}</strong>
+                        </AlertDescription>
+                    </AlertUI>
+                )}
+
                 <AlertsTable
                     alerts={alerts}
                     loading={loading}
-                    onRefresh={fetchAlerts}
+                    onRefresh={() => fetchAlertsWithRetry()}
                 />
             </div>
         </div>

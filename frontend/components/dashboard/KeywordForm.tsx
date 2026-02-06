@@ -33,6 +33,7 @@ interface KeywordFormProps {
     keyword: Keyword | null
     categories: Category[]
     onSuccess: () => void
+    targetUserId?: string
 }
 
 export default function KeywordForm({
@@ -40,7 +41,8 @@ export default function KeywordForm({
     onOpenChange,
     keyword,
     categories,
-    onSuccess
+    onSuccess,
+    targetUserId
 }: KeywordFormProps) {
     const [keywordText, setKeywordText] = useState('')
     const [categoryId, setCategoryId] = useState<string>('none')
@@ -98,7 +100,7 @@ export default function KeywordForm({
                 if (error) throw error
                 toast.success('Słowo kluczowe zostało zaktualizowane')
             } else {
-                payload.user_id = user.id
+                payload.user_id = targetUserId || user.id
                 const { error } = await supabase
                     .from('keywords')
                     .insert(payload)

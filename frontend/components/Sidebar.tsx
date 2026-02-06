@@ -9,11 +9,11 @@ import { Badge } from '@/components/ui/badge'
 import {
     LayoutDashboard,
     Users,
-    Settings,
     Bell,
     Bot,
     Hash,
-    FolderOpen
+    FolderOpen,
+    UserCog
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -118,16 +118,10 @@ export function Sidebar({ collapsed }: SidebarProps) {
             active: pathname === '/bots',
             adminOnly: false
         },
-        {
-            label: 'Ustawienia',
-            icon: Settings,
-            href: '/settings',
-            active: pathname === '/settings',
-            adminOnly: false
-        },
+
         {
             label: 'Użytkownicy',
-            icon: Users,
+            icon: UserCog,
             href: '/admin/users',
             active: pathname === '/admin/users',
             adminOnly: true

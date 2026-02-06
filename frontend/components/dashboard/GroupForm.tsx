@@ -33,6 +33,7 @@ interface GroupFormProps {
     group: Group | null
     categories: Category[]
     onSuccess: () => void
+    targetUserId?: string
 }
 
 const FB_GROUP_REGEX = /^https?:\/\/(www\.)?facebook\.com\/groups\/[\w.-]+\/?$/
@@ -42,7 +43,8 @@ export default function GroupForm({
     onOpenChange,
     group,
     categories,
-    onSuccess
+    onSuccess,
+    targetUserId
 }: GroupFormProps) {
     const [name, setName] = useState('')
     const [url, setUrl] = useState('')
@@ -115,7 +117,7 @@ export default function GroupForm({
                 if (error) throw error
                 toast.success('Grupa została zaktualizowana')
             } else {
-                payload.user_id = user.id
+                payload.user_id = targetUserId || user.id
                 const { error } = await supabase
                     .from('groups')
                     .insert(payload)

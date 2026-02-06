@@ -50,6 +50,7 @@ interface KeywordsTableProps {
     loading: boolean
     onRefresh: () => void
     onEdit: (keyword: Keyword) => void
+    readOnly?: boolean
 }
 
 export default function KeywordsTable({
@@ -57,7 +58,8 @@ export default function KeywordsTable({
     categories,
     loading,
     onRefresh,
-    onEdit
+    onEdit,
+    readOnly = false
 }: KeywordsTableProps) {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [keywordToDelete, setKeywordToDelete] = useState<Keyword | null>(null)
@@ -168,19 +170,25 @@ export default function KeywordsTable({
                                     <TableHead>Kategoria</TableHead>
                                     <TableHead>Dopasowania</TableHead>
                                     <TableHead>Utworzono</TableHead>
-                                    <TableHead className="text-right">Akcje</TableHead>
+                                    {!readOnly && <TableHead className="text-right">Akcje</TableHead>}
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {keywords.map((keyword) => (
                                     <TableRow key={keyword.id}>
                                         <TableCell>
-                                            <Switch
-                                                checked={keyword.is_active}
-                                                onCheckedChange={() => handleToggleActive(keyword)}
-                                                disabled={toggling === keyword.id}
-                                                className={keyword.is_active ? "bg-green-500" : ""}
-                                            />
+                                            {readOnly ? (
+                                                <Badge variant={keyword.is_active ? "default" : "secondary"} className={keyword.is_active ? "bg-green-500 hover:bg-green-600" : ""}>
+                                                    {keyword.is_active ? "Aktywne" : "Nieaktywne"}
+                                                </Badge>
+                                            ) : (
+                                                <Switch
+                                                    checked={keyword.is_active}
+                                                    onCheckedChange={() => handleToggleActive(keyword)}
+                                                    disabled={toggling === keyword.id}
+                                                    className={keyword.is_active ? "bg-green-500" : ""}
+                                                />
+                                            )}
                                         </TableCell>
                                         <TableCell className="font-medium">
                                             {keyword.keyword}
@@ -202,32 +210,34 @@ export default function KeywordsTable({
                                                 })}
                                             </span>
                                         </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex gap-2 justify-end">
-                                                <Button
-                                                    onClick={() => onEdit(keyword)}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                >
-                                                    <Pencil className="w-4 h-4" />
-                                                </Button>
-                                                <Button
-                                                    onClick={() => handleDeleteClick(keyword)}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </Button>
-                                            </div>
-                                        </TableCell>
+                                        {!readOnly && (
+                                            <TableCell className="text-right">
+                                                <div className="flex gap-2 justify-end">
+                                                    <Button
+                                                        onClick={() => onEdit(keyword)}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                    >
+                                                        <Pencil className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                        onClick={() => handleDeleteClick(keyword)}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        )}
                                     </TableRow>
                                 ))}
                             </TableBody>
                         </Table>
                     </div>
-                </CardContent>
-            </Card>
+                </CardContent >
+            </Card >
 
             <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <DialogContent>

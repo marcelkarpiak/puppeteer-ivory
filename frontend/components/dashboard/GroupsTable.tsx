@@ -54,6 +54,7 @@ interface GroupsTableProps {
     loading: boolean
     onRefresh: () => void
     onEdit: (group: Group) => void
+    readOnly?: boolean
 }
 
 export default function GroupsTable({
@@ -61,7 +62,8 @@ export default function GroupsTable({
     categories,
     loading,
     onRefresh,
-    onEdit
+    onEdit,
+    readOnly = false
 }: GroupsTableProps) {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [groupToDelete, setGroupToDelete] = useState<Group | null>(null)
@@ -172,20 +174,27 @@ export default function GroupsTable({
                                     <TableHead>Link</TableHead>
                                     <TableHead>Kategoria</TableHead>
                                     <TableHead>Posty</TableHead>
+                                    <TableHead>Posty</TableHead>
                                     <TableHead>Utworzona</TableHead>
-                                    <TableHead className="text-right">Akcje</TableHead>
+                                    {!readOnly && <TableHead className="text-right">Akcje</TableHead>}
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {groups.map((group) => (
                                     <TableRow key={group.id}>
                                         <TableCell>
-                                            <Switch
-                                                checked={group.is_active}
-                                                onCheckedChange={() => handleToggleActive(group)}
-                                                disabled={toggling === group.id}
-                                                className={group.is_active ? "bg-green-500" : ""}
-                                            />
+                                            {readOnly ? (
+                                                <Badge variant={group.is_active ? "default" : "secondary"} className={group.is_active ? "bg-green-500 hover:bg-green-600" : ""}>
+                                                    {group.is_active ? "Aktywna" : "Nieaktywna"}
+                                                </Badge>
+                                            ) : (
+                                                <Switch
+                                                    checked={group.is_active}
+                                                    onCheckedChange={() => handleToggleActive(group)}
+                                                    disabled={toggling === group.id}
+                                                    className={group.is_active ? "bg-green-500" : ""}
+                                                />
+                                            )}
                                         </TableCell>
                                         <TableCell className="font-medium">
                                             {group.name}
@@ -216,32 +225,34 @@ export default function GroupsTable({
                                                 })}
                                             </span>
                                         </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex gap-2 justify-end">
-                                                <Button
-                                                    onClick={() => onEdit(group)}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                >
-                                                    <Pencil className="w-4 h-4" />
-                                                </Button>
-                                                <Button
-                                                    onClick={() => handleDeleteClick(group)}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </Button>
-                                            </div>
-                                        </TableCell>
+                                        {!readOnly && (
+                                            <TableCell className="text-right">
+                                                <div className="flex gap-2 justify-end">
+                                                    <Button
+                                                        onClick={() => onEdit(group)}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                    >
+                                                        <Pencil className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                        onClick={() => handleDeleteClick(group)}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        )}
                                     </TableRow>
                                 ))}
                             </TableBody>
                         </Table>
                     </div>
                 </CardContent>
-            </Card>
+            </Card >
 
             <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <DialogContent>

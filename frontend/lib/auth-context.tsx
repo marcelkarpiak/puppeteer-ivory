@@ -99,9 +99,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
                     setUser(session?.user ?? null)
 
-                    // Check ref instead of state to avoid stale closure
-                    const needsProfile = session?.user && (!profileRef.current || event === 'SIGNED_IN');
-                    console.log(`[AuthDebug] ${new Date().toISOString()} Handling ${event}. Needs profile fetch?`, needsProfile)
+                    // Only fetch profile if we don't have one yet, or if the user ID changed (actual sign-in)
+                    const currentProfileId = profileRef.current?.id
+                    const needsProfile = session?.user && (
+                        !profileRef.current || currentProfileId !== session.user.id
+                    );
+                    console.log(`[AuthDebug] ${new Date().toISOString()} Handling ${event}. Needs profile fetch?`, needsProfile, `(cached: ${currentProfileId}, session: ${session?.user?.id})`)
 
                     if (needsProfile && session?.user) {
                         await fetchProfile(session.user.id)
@@ -129,6 +132,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             subscription.unsubscribe()
         }
     }, [router, supabase])
+
+    useEffect(() => {
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') return
+
+            // Debounce: visibilitychange can fire multiple times rapidly
+            if (debounceTimer) clearTimeout(debounceTimer)
+            debounceTimer = setTimeout(async () => {
+                console.log(`[AuthDebug] ${new Date().toISOString()} Document became visible. Refreshing session...`)
+                try {
+                    // getSession() will trigger onAuthStateChange which handles setUser/setProfile
+                    // so we do NOT call setUser here directly to avoid duplicate re-renders
+                    const { data: { session }, error } = await supabase.auth.getSession()
+
+                    if (error || !session) {
+                        console.log(`[AuthDebug] ${new Date().toISOString()} Session invalid on visibility change.`)
+                    } else {
+                        console.log(`[AuthDebug] ${new Date().toISOString()} Session active: ${session.user.id}`)
+                    }
+
+                    // Force internal timer restart
+                    supabase.auth.startAutoRefresh()
+                } catch (err) {
+                    // Gracefully handle AbortError from navigator lock contention
+                    if (err instanceof DOMException && err.name === 'AbortError') {
+                        console.log(`[AuthDebug] ${new Date().toISOString()} getSession aborted (lock contention), will retry via auto-refresh`)
+                    } else {
+                        console.error(`[AuthDebug] ${new Date().toISOString()} Error refreshing session on visibility change:`, err)
+                    }
+                }
+            }, 200)
+        }
+
+        // Only listen to visibilitychange - 'focus' fires redundantly and causes race conditions
+        window.addEventListener('visibilitychange', handleVisibilityChange)
+
+        return () => {
+            window.removeEventListener('visibilitychange', handleVisibilityChange)
+            if (debounceTimer) clearTimeout(debounceTimer)
+        }
+    }, [supabase])
 
     const signOut = async () => {
         await supabase.auth.signOut()
