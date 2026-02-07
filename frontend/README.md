@@ -15,7 +15,7 @@ Nowoczesny panel zarządzania dla systemu automatycznego skanowania grup Faceboo
 
 - Node.js 18+
 - Konto Supabase z skonfigurowaną bazą danych
-- Uruchomione boty (fb-scanner-bot.js i fb-screenshot-bot.js)
+- Uruchomiony bot (fb-bot.js)
 
 ## 🛠️ Instalacja
 
@@ -71,23 +71,18 @@ frontend/
 
 ## 🎯 Jak używać
 
-### 1. Uruchom boty (w osobnych terminalach)
+### 1. Uruchom bota
 
 ```bash
-# Terminal 1 - Scanner Bot
 cd ..
-node fb-scanner-bot.js
-
-# Terminal 2 - Screenshot Bot
-cd ..
-node fb-screenshot-bot.js
+node fb-bot.js
 ```
 
 ### 2. Zarządzaj postami w dashboardzie
 
 - **Wszystkie** - wszystkie posty w bazie
 - **Gotowe** - posty ze screenshotami, gotowe do opracowania
-- **W trakcie** - posty przetwarzane przez screenshot bota
+- **W trakcie** - posty w trakcie przetwarzania
 - **Błędy** - posty z błędami (wymagają uwagi)
 - **Opracowane** - posty oznaczone jako przetworzone
 - **Boty** - panel kontrolny i instrukcje
@@ -100,9 +95,8 @@ node fb-screenshot-bot.js
 
 ## 🔄 Workflow
 
-1. **Scanner Bot** skanuje grupę FB → filtruje według słów kluczowych → wysyła do n8n → n8n zapisuje do Supabase (status: `new`)
-2. **Screenshot Bot** pobiera posty `new` → robi screenshot → uploaduje do Storage → aktualizuje status na `done`
-3. **Dashboard** wyświetla posty `done` → pracownik oznacza jako `processed` lub `rejected`
+1. **FB Bot** skanuje grupę FB → filtruje według słów kluczowych → robi screenshot inline → uploaduje do Storage → zapisuje do Supabase (status: `done`)
+2. **Dashboard** wyświetla posty `done` → pracownik oznacza jako `processed` lub `rejected`
 
 ## 🎨 Stack technologiczny
 

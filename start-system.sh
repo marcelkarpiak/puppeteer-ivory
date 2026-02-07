@@ -20,13 +20,6 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Sprawdź czy cookies istnieją
-if [ ! -f fb-session/cookies.json ]; then
-    echo -e "${YELLOW}⚠️  Brak pliku fb-session/cookies.json!${NC}"
-    echo "Musisz najpierw zalogować się do Facebooka i zapisać ciasteczka."
-    exit 1
-fi
-
 echo -e "${GREEN}✓${NC} Pliki konfiguracyjne OK"
 echo ""
 
@@ -44,12 +37,8 @@ EOF
 }
 
 # Uruchom komponenty
-echo -e "${BLUE}📡 Uruchamiam Scanner Bot...${NC}"
-open_terminal "🔍 FB Scanner Bot" "node fb-scanner-bot.js"
-sleep 2
-
-echo -e "${BLUE}📸 Uruchamiam Screenshot Bot...${NC}"
-open_terminal "📷 FB Screenshot Bot" "node fb-screenshot-bot.js"
+echo -e "${BLUE}🤖 Uruchamiam FB Bot...${NC}"
+open_terminal "🤖 FB Bot" "node fb-bot.js"
 sleep 2
 
 echo -e "${BLUE}🌐 Uruchamiam Frontend Dashboard...${NC}"

@@ -221,7 +221,7 @@ create_scripts() {
 #!/bin/bash
 echo "🚀 Uruchamianie Facebook Bota..."
 cd "$(dirname "$0")"
-node fb-scanner-bot.js
+node fb-bot.js
 EOF
     chmod +x start-bot.sh
     
@@ -260,7 +260,7 @@ final_info() {
     echo "🚀 Uruchomienie:"
     echo "   ./start-bot.sh"
     echo "   lub"
-    echo "   node fb-scanner-bot.js"
+    echo "   node fb-bot.js"
     echo ""
     echo "📊 Monitorowanie:"
     echo "   ./monitor-bot.sh"

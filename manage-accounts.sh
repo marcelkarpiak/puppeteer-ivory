@@ -42,24 +42,16 @@ report.accounts.forEach(acc => {
         ;;
     
     "setup")
-        echo "🔧 Setup指南:"
+        echo "🔧 Setup:"
         echo ""
-        echo "1. Zaloguj się na konto scanner:"
-        echo "   Email: scanner@example.com"
-        echo "   Zapisz cookies: accounts/scanner-account/fb-session/cookies.json"
+        echo "1. Zaloguj się na konto w profilu Chrome (userDataDir)"
         echo ""
-        echo "2. Zaloguj się na konto screenshot:"
-        echo "   Email: screenshot@example.com"
-        echo "   Zapisz cookies: accounts/screenshot-account/fb-session/cookies.json"
+        echo "2. Uruchom bota:"
+        echo "   node fb-bot.js"
         echo ""
-        echo "3. Uruchom boty:"
-        echo "   node fb-scanner-bot.js"
-        echo "   node fb-screenshot-bot.js"
-        echo ""
-        echo "4. Sprawdź separację:"
+        echo "3. Sprawdź proces:"
         echo "   ps aux | grep -i chrome"
         echo ""
-        echo "🌐 Każdy bot używa oddzielnego profilu Chrome!"
         ;;
     
     "clean")
@@ -90,31 +82,26 @@ console.log('✅ Profile przeglądarek wyczyszczone');
         ;;
     
     "test")
-        echo "🧪 Testowanie browser isolation:"
+        echo "🧪 Testowanie bota:"
         echo ""
-        echo "Uruchamiam oba boty w tle..."
-        node fb-scanner-bot.js &
-        SCANNER_PID=$!
-        
-        sleep 2
-        
-        node fb-screenshot-bot.js &
-        SCREENSHOT_PID=$!
-        
-        sleep 3
-        
+        echo "Uruchamiam bota w tle..."
+        node fb-bot.js &
+        BOT_PID=$!
+
+        sleep 5
+
         echo ""
         echo "🌐 Procesy Chrome:"
         ps aux | grep -i chrome | grep -v grep | grep -E "(Google Chrome|chrome)" | head -10
-        
+
         echo ""
         echo "📁 Profile paths:"
         find accounts/ -name "browser-profile" -type d -exec ls -la {} \;
-        
+
         echo ""
-        echo "🛑 Zatrzymuję boty..."
-        kill $SCANNER_PID $SCREENSHOT_PID 2>/dev/null
-        
+        echo "🛑 Zatrzymuję bota..."
+        kill $BOT_PID 2>/dev/null
+
         echo "✅ Test zakończony"
         ;;
     

@@ -184,7 +184,7 @@ if [ "$READY" = true ]; then
     echo "🎉 System jest gotowy do uruchomienia!"
     echo ""
     echo "🚀 Uruchomienie:"
-    echo "   node fb-scanner-bot.js"
+    echo "   node fb-bot.js"
     echo ""
     echo "🧪 Testowanie:"
     echo "   node test-stealth.js"

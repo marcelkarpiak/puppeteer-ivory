@@ -74,11 +74,7 @@ git push
 Boty nadal uruchamiasz **lokalnie na swoim komputerze**:
 
 ```bash
-# Terminal 1
-node fb-scanner-bot.js
-
-# Terminal 2
-node fb-screenshot-bot.js
+node fb-bot.js
 ```
 
 ## 📊 Jak to działa
@@ -104,8 +100,7 @@ node fb-screenshot-bot.js
            ↑
 ┌──────────────────────────────────┐
 │  TWÓJ KOMPUTER (8h dziennie)     │
-│  - fb-scanner-bot.js             │
-│  - fb-screenshot-bot.js          │
+│  - fb-bot.js                     │
 └──────────────────────────────────┘
 ```
 
