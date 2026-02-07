@@ -1,0 +1,290 @@
+AUDYT BEZPIECZENSTWA - Analiza ryzyka bana na Facebooku                                             
+                                                                                                        
+  Kontekst                                                                                              
+
+  - Ubuntu, biuro klienta, jedno wygrzane konto FB, ludzie uzywaja przed/po bocie
+  - Zaimplementowane: ETAP 1-2 (wg PLAN), częściowo 3-9
+
+  ---
+  KRYTYCZNE (natychmiastowe ryzyko bana)
+
+  1. Screenshot bot NIE stosuje fingerprintu
+
+  Pliki: fb-screenshot-bot.js:110, fb-scanner-bot.js:1289
+
+  Scanner wywoluje fingerprintManager.applyFingerprint(page, fingerprint) - UA, platform, timezone,
+  canvas spoofing, WebGL, audio, CDP evasion. Screenshot bot nie robi nic z tego - ustawia jedynie
+  viewport 1280x800.
+
+  Z perspektywy Facebooka to samo konto loguje sie z dwoch roznych urzadzen: jedno z Linux UA,
+  spoofowanym canvasem, WebGL Intel GPU - drugie z domyslnym Puppeteer fingerprintem (SwiftShader GPU,
+  domyslny UA, brak spoofingu canvas/audio). To jest jeden z najsilniejszych sygnalow bota - niespojny
+  fingerprint urzadzenia na tym samym koncie.
+
+  2. Przestarzale wersje Chrome w User-Agent
+
+  Plik: lib/device-fingerprint.js:10-14
+
+  UA strings to Chrome 120-123. Dzisiaj (luty 2026) aktualne wersje to ~130+. Facebook sladzi
+  dystrybucje wersji Chrome - Chrome 120 jest uzywany przez <0.5% uzytkownikow. To natychmiastowy
+  outlier.
+
+  Co wazniejsze: Client Hints (Sec-CH-UA, Sec-CH-UA-Full-Version) sa wysylane automatycznie przez
+  prawdziwy Chrome i zawieraja RZECZYWISTA wersje przegladarki. Spoofowany UA mowi "Chrome/120", ale
+  naglowki Client Hints mowia "Chrome/131" (albo cokolwiek jest zainstalowane). Ten mismatch jest
+  trywialny do wykrycia.
+
+  3. Sec-CH-UA-Platform: "Windows" w headerach
+
+  Plik: lib/proxy-rotation.js:96
+
+  { 'Sec-CH-UA-Platform': '"Windows"' }
+
+  Ten header jest losowo dolaczany do requestow. Bot dziala na Linux, fingerprint mowi "Linux x86_64",
+  UA mowi "X11; Linux" - ale request przychodzi z Client Hint Platform: Windows. Trywialnie wykrywalny
+  mismatch.
+
+  4. delete window.chrome.runtime - usuwanie legit API
+
+  Plik: fb-scanner-bot.js:1304
+
+  delete window.chrome.runtime;
+
+  W prawdziwym Chrome chrome.runtime istnieje (jest czescia Extensions API). Usuwanie go jest bardziej
+  podejrzane niz pozostawienie - Facebook moze sprawdzic jego obecnosc. Brak chrome.runtime = nietypowa
+  konfiguracja przegladarki.
+
+  5. Flaga --single-process
+
+  Plik: lib/account-manager.js:155
+
+  Prawdziwy Chrome NIGDY nie uzywa --single-process. To flaga typowa wylacznie dla srodowisk
+  automatyzacji/dockerowych. Facebook moze to wykryc po zachowaniu procesu i metrykach wydajnosci
+  (single-process Chrome ma inne timings, inne zachowanie GC). Pewne strony/skrypty moga tez sprawdzac
+  navigator.hardwareConcurrency w relacji do faktycznej liczby procesow roboczych.
+
+  ---
+  WYSOKIE (znaczny wektor wykrycia)
+
+  6. Brak obrony Client Hints (KRYTYCZNY brak)
+
+  Nowoczesny Chrome automatycznie wysyla:
+  - Sec-CH-UA - marka i wersja przegladarki
+  - Sec-CH-UA-Platform - platforma OS
+  - Sec-CH-UA-Mobile - czy mobile
+  - Sec-CH-UA-Full-Version-List - pelne wersje
+
+  Te naglowki sa wysylane przez Chrome BINARNE, nie przez Puppeteer, wiec setExtraHTTPHeaders ich nie
+  nadpisze. Facebook widzi jednoczesnie:
+  - User-Agent: Chrome/120 (spoofowany)
+  - Sec-CH-UA: "Chrome";v="131" (prawdziwy, z binary)
+
+  Brak jakiejkolwiek logiki do obslugi Client Hints.
+
+  7. Podwojne ustawianie Accept-Language
+
+  Pliki: lib/device-fingerprint.js:103-105, lib/proxy-rotation.js:18,29
+
+  Fingerprint ustawia Accept-Language: pl-PL,pl,en-US,en przez setExtraHTTPHeaders. Nastepnie
+  proxy-rotation ustawia INNE Accept-Language (np. en-US,en;q=0.9). Drugie wywolanie setExtraHTTPHeaders
+   nadpisuje pierwsze - jezyk moze sie zmienic z polskiego na angielski miedzy sesjami, mimo ze konto
+  jest polskie.
+
+  8. Mouse movement zaczyna zawsze z losowego punktu (0-100)
+
+  Plik: lib/human-behavior.js:67-68
+
+  const startX = Math.random() * 100;
+  const startY = Math.random() * 100;
+
+  Prawdziwa mysz ma ciaglosc - kazdy ruch zaczyna sie tam, gdzie skonczyl sie poprzedni. Bot za kazdym
+  razem "teleportuje" mysz do losowego punktu w lewym gornym rogu przed ruchem. Facebook sladzi
+  trajectory myszy - nagly skok pozycji to klasyczny sygnal bota.
+
+  9. Viewport offset +-10px tworzy niestandardowe rozdzielczosci
+
+  Plik: lib/device-fingerprint.js:63-68
+
+  const offsetW = Math.floor(Math.random() * 20) - 10;
+  const offsetH = Math.floor(Math.random() * 20) - 10;
+
+  Viewport 1373x761 zamiast standardowego 1366x768 jest bardziej podejrzany niz standardowy. Prawdziwe
+  przegladarki maja rozdzielczosci bedace standardowymi wartosciami. Niestandardowy viewport to sygnal
+  automatyzacji (bo prawdziwi uzytkownicy nie modyfikuja rozdzielczosci o losowe piksele).
+
+  10. Niebezpieczne "symulacje bledow" - Ctrl+T, Ctrl+W, F5
+
+  Pliki: lib/human-error-simulation.js:150-178, lib/human-idle-behaviors.js:141
+
+  - accidentalTab() wykonuje Ctrl+T (nowy tab) i Ctrl+W (zamknij tab) - moze zamknac strobe FB bota
+  - keyboardActivity() naciska F5 (odswiez strone) - moze przerwac skanowanie
+  - Zoom Ctrl+scroll jest niezwykle rzadki na Facebooku i wyroznia konto
+
+  Te akcje sa nie tylko ryzykowne operacyjnie, ale tez generuja eventy ktore Facebook loguje i ktore sa
+  anomaliami w normalnym zachowaniu przegladania feedu.
+
+  11. Prototypy natywnych funkcji sa modyfikowane w wykrywalny sposob
+
+  Plik: lib/device-fingerprint.js:181-284
+
+  HTMLCanvasElement.prototype.toDataURL = function(type) { ... }
+  CanvasRenderingContext2D.prototype.getImageData = function() { ... }
+  WebGLRenderingContext.prototype.getParameter = function(param) { ... }
+
+  Facebook moze sprawdzic:
+  HTMLCanvasElement.prototype.toDataURL.toString()
+  // Oryginalna: "function toDataURL() { [native code] }"
+  // Zmodyfikowana: "function(type) { const ctx = ..."
+
+  Jest to jedno z najbardziej znanych wykryc - sprawdzanie .toString() na natywnych funkcjach.
+  StealthPlugin probuje to obejsc, ale te nadpisania sa robione po StealthPlugin, wiec moga nie byc
+  chronione.
+
+  ---
+  SREDNIE (wykrywalne wzorce)
+
+  12. Rozne flagi Chrome miedzy botami
+
+  Scanner: --disable-infobars, --disable-blink-features=AutomationControlled,
+  --disable-features=IsolateOrigins,site-per-process
+
+  Screenshot bot (przez account-manager): --no-sandbox, --disable-setuid-sandbox, --no-first-run,
+  --no-zygote, --single-process, --disable-gpu
+
+  Rozne zestawy flag = rozne zachowanie przegladarki = rozny fingerprint na tym samym koncie.
+
+  13. Network throttling 4G na komputerze stacjonarnym
+
+  Plik: config/scraper.json:28
+
+  Bot emuluje polaczenie 4G (4Mbps down, 20ms latency) na maszynie podlaczonej do biurowego internetu.
+  Facebook moze zmierzyc rzeczywista predkosc (np. czas ladowania zasobow) i zauwazyc niespojnosc.
+
+  14. Bimodalny wzorzec uzytkowania
+
+  Konfiguracja: bot Pn-Pt 7:30-18:30, weekendy OFF, ludzie uzywaja poza godzinami.
+
+  Z perspektywy Facebooka: konto ktore od poniedzialku do piatku przychodzi o 7:30-9:30, przegla grupy
+  jak w zegarku, i znika, a w weekendy nagle zmienia zachowanie na typowe (telefon, messenger) - to jest
+   wzorzec dwuosobowy (dwa rozne profile zachowania na jednym koncie). Facebook ma ML modele trenowane
+  na wykrywaniu wlasnie takich wzorcow.
+
+  15. Konflikty cookies: JSON file vs Chrome profile
+
+  Oba boty uzywaja userDataDir (wspolny profil Chrome) i dodatkowo laduja cookies z pliku JSON. Chrome
+  profile juz przechowuje cookies w SQLite. Reczne page.setCookie() moze powodowac niespojnosci - np.
+  zduplikowane cookies, rozne wartosci tokenow sesji miedzy SQLite a JSON.
+
+  16. humanScroll pattern - 80/20 down/up ratio jest stalym patternem
+
+  Plik: lib/human-behavior.js:113
+
+  const scrollDirection = Math.random() < 0.8 ? 1 : -1; // 80% down, 20% up
+
+  Stale prawdopodobienstwo 80/20 tworzy rozpoznawalny pattern statystyczny w dlugim okresie. Prawdziwi
+  uzytkownicy zmieniaja proporcje scrollowania w zaleznosci od kontekstu (szukanie konkretnego postu =
+  wiecej scrollowania w dol, czytanie = wiecej scroll up).
+
+  17. humanDelay uzywa prostego uniform random zamiast prawdziwych rozkladow
+
+  const delay = Math.floor(Math.random() * (max - min) + min);
+
+  Prawdziwe ludzkie opoznienia maja rozklad log-normalny lub gamma, nie uniform. Uniform random daje
+  plaski rozklad ktory nie wystepuje w naturze. Facebook zbierajacy metryki time-between-actions moze to
+   wykryc statystycznie.
+
+  18. Brak interakcji spolecznych
+
+  Bot wylacznie czyta - nigdy nie lajkuje, nie komentuje, nie udostepnia. Konto ktore codziennie
+  przychodzi na te same grupy, scrolluje, czyta posty, ale nigdy nie interaguje - jest anomalia.
+  Prawdziwi uzytkownicy, nawet bierni, okazjonalnie reaguja.
+
+  19. WebGL placeholder values
+
+  Plik: lib/device-fingerprint.js:215-216
+
+  const REAL_GPU_VENDOR = 'Google Inc. (Intel)';
+  const REAL_GPU_RENDERER = 'ANGLE (Intel, Mesa Intel UHD Graphics 630 (CFL GT2), OpenGL 4.6)';
+
+  To sa placeholder values ktore musza byc dostosowane do karty graficznej maszyny klienta. Jesli klient
+   ma np. AMD GPU, te wartosci beda mismatchem z innymi sygnalami (np. wydajnosc WebGL renderingu nie
+  bedzie odpowiadac deklarowanemu GPU).
+
+  ---
+  NISKIE (dodatkowe ryzyko)
+
+  20. DNT: 1 w headerach
+
+  Plik: lib/proxy-rotation.js:19
+
+  Tylko ~5% uzytkownikow ustawia DNT:1. To dodatkowy sygnal odroznialnosci fingerprint.
+
+  21. tabSwitch() emuluje visibilitychange przez JS
+
+  Plik: lib/human-idle-behaviors.js:184-199
+
+  Object.defineProperty(document, 'hidden', { value: true, ... });
+  document.dispatchEvent(new Event('visibilitychange'));
+
+  Facebook moze rozroznic prawdziwy visibilitychange (wyzwalany przez przegladarke) od syntetycznego
+  (wyzwalanego przez JS). Prawdziwy zmienia zachowanie wielu wewnetrznych API (np. requestAnimationFrame
+   zwalnia, setTimeout jest throttlowany). Syntetyczny nie ma tych efektow ubocznych.
+
+  22. sort(() => Math.random() - 0.5) do tasowania
+
+  Plik: fb-scanner-bot.js:477
+
+  To nie jest poprawne Fisher-Yates shuffle - produkuje stronniczy rozklad. W dlugim okresie pewne
+  kolejnosci grup beda czestsze niz inne, co tworzy pattern.
+
+  23. Brak spoofingu navigator.connection
+
+  Na Ubuntu navigator.connection moze zwracac wartosci specyficzne dla srodowiska (type: "ethernet"), co
+   jest spojne z biurem, ale brak jakiejkolwiek kontroli nad tym API.
+
+  24. --disable-gpu w screenshot bocie
+
+  GPU jest wylaczone, co zmienia renderowanie WebGL i canvas. To tworzy inny fingerprint renderowania
+  niz scanner (ktory nie ma tej flagi).
+
+  ---
+  PODSUMOWANIE RYZYKA
+  ┌───────────┬─────────────────┬───────────────────────────────────────────────────┐
+  │ Kategoria │ Ilosc problemow │                       Wplyw                       │
+  ├───────────┼─────────────────┼───────────────────────────────────────────────────┤
+  │ KRYTYCZNE │ 5               │ Ban w ciagu dni-tygodni                           │
+  ├───────────┼─────────────────┼───────────────────────────────────────────────────┤
+  │ WYSOKIE   │ 6               │ Ban w ciagu tygodni-miesiecy                      │
+  ├───────────┼─────────────────┼───────────────────────────────────────────────────┤
+  │ SREDNIE   │ 8               │ Podwyzszony risk score, wzgledna laczna podatnosc │
+  ├───────────┼─────────────────┼───────────────────────────────────────────────────┤
+  │ NISKIE    │ 5               │ Dodatkowe sygnaly w agregacji                     │
+  └───────────┴─────────────────┴───────────────────────────────────────────────────┘
+  Szacowane ryzyko bana (miesiecznie)
+  ┌────────────────────────────────────────────┬─────────┐
+  │                    Stan                    │ Ryzyko  │
+  ├────────────────────────────────────────────┼─────────┤
+  │ Obecny stan kodu                           │ 35-45%  │
+  ├────────────────────────────────────────────┼─────────┤
+  │ Po naprawie KRYTYCZNYCH                    │ ~15-20% │
+  ├────────────────────────────────────────────┼─────────┤
+  │ Po naprawie KRYTYCZNYCH + WYSOKICH         │ ~8-12%  │
+  ├────────────────────────────────────────────┼─────────┤
+  │ Po naprawie wszystkiego + aktywnosc ludzka │ ~3-5%   │
+  └────────────────────────────────────────────┴─────────┘
+  Top 5 najpilniejszych zmian (w kolejnosci priorytetu):
+
+  1. Zastosowac fingerprint w screenshot bocie - identycznie jak w scannerze
+  2. Zaktualizowac wersje Chrome w UA do aktualnej zainstalowanej + obsluga Client Hints (lub uzycie UA
+  prawdziwego Chrome zamiast spoofingu)
+  3. Usunac --single-process, delete chrome.runtime, niespojne flagi Chrome miedzy botami
+  4. Usunac Sec-CH-UA-Platform: Windows z proxy-rotation
+  5. Usunac niebezpieczne symulacje (Ctrl+T/W, F5, zoom) ktore moga crashnac bota i generuja anomalie
+
+  ---
+  Zalecenia architektoniczne
+
+  Najwazniejsza zmiana architektoniczna: zamiast spoofowania UA na stara wersje Chrome, uzyc
+  RZECZYWISTEGO UA przegladarki zainstalowanej na maszynie. Odczytac wersje Chrome z google-chrome
+  --version, zbudowac UA na jej podstawie. To eliminuje caly problem Client Hints mismatch, bo naglowki
+  beda spone z binarym.

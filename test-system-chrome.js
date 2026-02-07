@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { getChromePath } = require('./lib/account-manager');
 
 puppeteer.use(StealthPlugin());
 
@@ -8,7 +9,7 @@ puppeteer.use(StealthPlugin());
     try {
         const browser = await puppeteer.launch({
             headless: false, // System Chrome usually works better headed for debugging
-            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            executablePath: getChromePath(),
             args: ['--no-sandbox']
         });
         console.log('✅ SYSTEM CHROME launched successfully!');

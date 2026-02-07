@@ -1,6 +1,8 @@
 const os = require('os'); // Added for hostname
 
 const AccountManager = require("./lib/account-manager");
+const { getChromePath } = require("./lib/account-manager");
+const BrowserLock = require("./lib/browser-lock");
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
@@ -10,12 +12,14 @@ const {
     humanScroll,
     humanClick,
     checkBanRisk,
-    sleep
+    handleCheckpoint,
+    sleep,
+    simulateContentEngagement
 } = require('./lib/human-behavior');
 const SessionManager = require('./lib/session-manager');
 const DeviceFingerprint = require('./lib/device-fingerprint');
 const HumanIdleBehaviors = require('./lib/human-idle-behaviors');
-const ProxyRotation = require('./lib/proxy-rotation');
+
 const HumanErrorSimulation = require('./lib/human-error-simulation');
 const CacheManager = require('./lib/cache-manager');
 const BehavioralLearning = require('./lib/behavioral-learning');
@@ -23,6 +27,9 @@ const RiskPrediction = require('./lib/risk-prediction');
 const StatefulScanner = require('./lib/stateful-scanner');
 const FaultTolerance = require('./lib/fault-tolerance');
 const DistributedCoordinator = require('./lib/distributed-coordinator');
+const { warmupSession } = require('./lib/session-warmup');
+const { cooldownSession } = require('./lib/session-cooldown');
+const BreakInManager = require('./lib/break-in-manager');
 
 // Supabase client - używamy SERVICE_ROLE_KEY dla botów (omija RLS)
 const { createClient } = require('@supabase/supabase-js');
@@ -58,6 +65,11 @@ if (!scannerAccount) {
     process.exit(1);
 }
 const SESSION_PATH = path.join(__dirname, scannerAccount.paths.session, 'cookies.json');
+
+// ETAP 7.3: Break-in manager (stopniowe zwiekszanie aktywnosci)
+const LEARNING_PATH = path.resolve(__dirname, scannerAccount.paths.learning || './learning-data');
+if (!fs.existsSync(LEARNING_PATH)) fs.mkdirSync(LEARNING_PATH, { recursive: true });
+const breakInManager = new BreakInManager(LEARNING_PATH);
 
 // Globalne zmienne dla monitorowania
 let botInstanceId = null;
@@ -432,6 +444,77 @@ function getRandomGroup() {
 }
 
 /**
+ * ETAP 6.1: Rotacja kolejnosci grup
+ * W kazdej sesji losowo wybiera 1-2 grupy (nie zawsze wszystkie).
+ * 60% szans: 1 grupa, 40% szans: 2 grupy.
+ */
+function selectGroupsForSession() {
+    let allGroups = [];
+
+    // 1. Grupy z bazy
+    if (dbGroups && dbGroups.length > 0) {
+        allGroups = dbGroups.map(g => ({
+            id: g.id,
+            name: g.name,
+            url: g.url,
+            category_id: g.category_id,
+            user_id: g.user_id
+        }));
+    }
+    // 2. Fallback na grupy z CONFIG
+    else if (CONFIG.groups && CONFIG.groups.length > 0) {
+        allGroups = CONFIG.groups;
+    }
+    // 3. Fallback na pojedyncza grupe
+    else {
+        return [CONFIG.group];
+    }
+
+    // Jesli tylko 1 grupa dostepna - zwroc ja
+    if (allGroups.length <= 1) return allGroups;
+
+    // Losowa kolejnosc
+    const shuffled = [...allGroups].sort(() => Math.random() - 0.5);
+
+    // 60% szans: 1 grupa, 40% szans: 2 grupy
+    const count = Math.random() < 0.6 ? 1 : 2;
+    return shuffled.slice(0, Math.min(count, shuffled.length));
+}
+
+/**
+ * ETAP 6.2: Zroznicowanie dlugosci sesji
+ * Losuje limit postow na sesje - krotka, normalna lub dluga.
+ */
+function getMaxPostsForSession() {
+    const roll = Math.random();
+    if (roll < 0.3) {
+        // Krotka sesja (30%) - "sprawdzam szybko co nowego"
+        return 3 + Math.floor(Math.random() * 4);  // 3-6
+    } else if (roll < 0.8) {
+        // Normalna sesja (50%) - "przegladam grupe"
+        return 7 + Math.floor(Math.random() * 6);  // 7-12
+    } else {
+        // Dluga sesja (20%) - "mam czas, czytam wszystko"
+        return 13 + Math.floor(Math.random() * 6); // 13-18
+    }
+}
+
+/**
+ * ETAP 2.7: Zapisuje cookies po kazdej sesji (odswiezanie sesji)
+ */
+async function saveCookies(page) {
+    try {
+        const cookies = await page.cookies();
+        if (cookies.length > 0) {
+            fs.writeFileSync(SESSION_PATH, JSON.stringify(cookies, null, 2));
+            console.log(`🍪 Zapisano ${cookies.length} cookies`);
+        }
+    } catch (err) {
+        console.error('⚠️ Blad zapisu cookies:', err.message);
+    }
+}
+
+/**
  * Ładuje ciasteczka z pliku
  */
 async function loadCookies(page) {
@@ -665,8 +748,17 @@ async function scrapeFacebook(page, targetGroup = null) {
         } catch (e) {
             console.log('⚠️ Nie znaleziono feedu (timeout). Sprawdzam bana...');
             if (await checkBanRisk(page)) {
-                await logAlert('checkpoint', 'Wykryto ryzyko bana/checkpoint podczas ładowania feedu (Timeout feedu)');
-                throw new Error('Ban detected');
+                // ETAP 8: Obsluga checkpointu jak czlowiek
+                const checkpoint = await handleCheckpoint(page, async (alert) => {
+                    await logAlert('checkpoint', alert.message, { url: alert.url, action: alert.action });
+                });
+                if (checkpoint.shouldStop) {
+                    const cooldownUntil = new Date(Date.now() + checkpoint.cooldownHours * 60 * 60 * 1000);
+                    const cooldownFile = path.join(LEARNING_PATH, 'cooldown-until.json');
+                    fs.writeFileSync(cooldownFile, JSON.stringify({ until: cooldownUntil.toISOString() }));
+                    console.log(`⛔ Bot zatrzymany na ${checkpoint.cooldownHours}h - wymagana reczna weryfikacja`);
+                }
+                throw new Error('Ban detected - checkpoint');
             }
         }
     }, 'feed_detection', { groupName });
@@ -683,11 +775,11 @@ async function scrapeFacebook(page, targetGroup = null) {
     console.log(`   🔎 Znaleziono ${particleHandles.length} elementów (postów/reklam).`);
 
     let processedCount = 0;
-    const maxPosts = typeof CONFIG.safety.maxPostsPerSession === 'object'
-        ? Math.floor(Math.random() * (CONFIG.safety.maxPostsPerSession.max - CONFIG.safety.maxPostsPerSession.min + 1)) + CONFIG.safety.maxPostsPerSession.min
-        : CONFIG.safety.maxPostsPerSession;
-
-    console.log(`   🎯 Limit postów na sesję: ${maxPosts}`);
+    // ETAP 6.2 + 7.3: Zroznicowane dlugosci sesji, ograniczone przez break-in
+    const breakInMaxPosts = breakInManager.getMaxPostsForDay();
+    const maxPosts = Math.min(getMaxPostsForSession(), breakInMaxPosts);
+    const sessionType = maxPosts <= 6 ? 'krotka' : maxPosts <= 12 ? 'normalna' : 'dluga';
+    console.log(`   🎯 Sesja ${sessionType}: limit ${maxPosts} postow (break-in limit: ${breakInMaxPosts})`);
 
     // Resetuj statystyki Stateful Scanner
     statefulScanner.resetSessionStats();
@@ -882,9 +974,18 @@ async function scrapeFacebook(page, targetGroup = null) {
             console.error('   ❌ Błąd przetwarzania posta:', err.message);
         }
 
+        // ETAP 6.3: Micro-interakcje z trescia (hover na reakcjach/avatarze)
+        await simulateContentEngagement(page, postHandle);
+
         // Losowe zachowanie co kilka postów
         if (processedCount > 0 && processedCount % 3 === 0) {
             await idleBehaviors.simulateThinking();
+        }
+
+        // ETAP 6.4: Symulacja zmiany taba - losowy interwal (nie co stala liczbe postow)
+        if (processedCount > 0 && Math.random() < 0.07) {
+            console.log('   🔄 Symulacja zmiany taba...');
+            await idleBehaviors.tabSwitch();
         }
     }
 
@@ -1007,6 +1108,24 @@ async function performRandomNavigation(page) {
 async function runBot() {
     console.log('🚀 Uruchamianie Facebook Bot v2.0 z Distributed Architecture...');
 
+    // ETAP 8.3: Sprawdz czy bot jest w cooldownie po checkpoincie
+    const cooldownFile = path.join(LEARNING_PATH, 'cooldown-until.json');
+    if (fs.existsSync(cooldownFile)) {
+        try {
+            const { until } = JSON.parse(fs.readFileSync(cooldownFile, 'utf8'));
+            if (new Date() < new Date(until)) {
+                const remaining = Math.ceil((new Date(until) - Date.now()) / 3600000);
+                console.log(`⛔ Bot w trybie cooldown - pozostalo ${remaining}h. Wymaga recznej weryfikacji checkpointu.`);
+                process.exit(0);
+            } else {
+                fs.unlinkSync(cooldownFile);
+                console.log('✅ Cooldown zakonczony - wznawianie pracy');
+            }
+        } catch (e) {
+            fs.unlinkSync(cooldownFile);
+        }
+    }
+
     // Pobierz dane z bazy przy starcie
     await refreshDataFromDB();
 
@@ -1022,6 +1141,8 @@ async function runBot() {
     await coordinator.initialize();
 
     const sessionManager = new SessionManager(CONFIG);
+    let dailySessionCount = 0;
+    let lastSessionDate = new Date().toDateString();
     let running = true;
 
     // Obsługa zamknięcia procesu
@@ -1041,28 +1162,63 @@ async function runBot() {
             // Odśwież dane z bazy przed każdą sesją
             await refreshDataFromDB();
 
-            // Losuj grupę docelową
-            const targetGroup = getRandomGroup();
-            console.log(`🎯 Sesja: ${targetGroup.name} (${targetGroup.url})`);
-
-            // Użyj distributed coordinator do wykonania zadania
-            if (coordinator.isCoordinator) {
-                // Jako koordynator, rozdziel zadanie
-                const task = {
-                    type: 'scrape_group',
-                    targetGroup: targetGroup,
-                    priority: 'normal',
-                    metadata: {
-                        timestamp: Date.now(),
-                        instanceId: coordinator.instanceId
-                    }
-                };
-
-                await coordinator.distributeTask(task);
-            } else {
-                // Jako worker, wykonaj zadanie lokalnie
-                await runSingleSession(targetGroup, coordinator);
+            // ETAP 7: Sprawdz czy powinien pracowac (dzien roboczy + aktywne godziny)
+            if (!sessionManager.shouldWork()) {
+                await sessionManager.waitForActiveHours();
+                continue; // Po obudzeniu sprawdz ponownie warunki
             }
+
+            // ETAP 7.3: Break-in period - stopniowe zwiekszanie aktywnosci
+            const today = new Date().toDateString();
+            if (lastSessionDate !== today) {
+                dailySessionCount = 0;
+                lastSessionDate = today;
+            }
+            const breakInStatus = breakInManager.getStatus();
+            console.log(`📊 Break-in: dzien ${breakInStatus.daysSinceFirstRun}, faza: ${breakInStatus.phase}, mnoznik: ${breakInStatus.activityMultiplier}`);
+
+            if (dailySessionCount >= breakInStatus.maxSessions) {
+                console.log(`🛑 Break-in limit: osiagnieto ${dailySessionCount}/${breakInStatus.maxSessions} sesji na dzis. Czekam do jutra.`);
+                await sessionManager.waitForActiveHours();
+                continue;
+            }
+
+            // ETAP 6.1: Wybierz 1-2 grupy na ta sesje (losowa kolejnosc)
+            const sessionGroups = selectGroupsForSession();
+            console.log(`🎯 Sesja: ${sessionGroups.length} grup - ${sessionGroups.map(g => g.name).join(', ')}`);
+
+            for (const targetGroup of sessionGroups) {
+                if (!running) break;
+
+                console.log(`   📂 Skanuje: ${targetGroup.name} (${targetGroup.url})`);
+
+                // Użyj distributed coordinator do wykonania zadania
+                if (coordinator.isCoordinator) {
+                    const task = {
+                        type: 'scrape_group',
+                        targetGroup: targetGroup,
+                        priority: 'normal',
+                        metadata: {
+                            timestamp: Date.now(),
+                            instanceId: coordinator.instanceId
+                        }
+                    };
+                    await coordinator.distributeTask(task);
+                } else {
+                    await runSingleSession(targetGroup, coordinator);
+                }
+
+                // Przerwa miedzy grupami (jesli wiecej niz 1): 3-8 minut
+                if (sessionGroups.indexOf(targetGroup) < sessionGroups.length - 1) {
+                    const breakMs = 180000 + Math.random() * 300000;
+                    console.log(`   ⏸️ Przerwa ${Math.round(breakMs / 60000)} min przed nastepna grupa...`);
+                    await sleep(breakMs);
+                }
+            }
+
+            // ETAP 7.3: Zapisz ukonczenie sesji
+            dailySessionCount++;
+            breakInManager.recordSessionCompleted();
 
             // Czekaj losowy czas między sesjami
             if (running) {
@@ -1088,77 +1244,55 @@ async function runBot() {
  */
 async function runSingleSession(targetGroup, coordinator = null) {
     let browser;
+    let page;
     const fingerprintManager = new DeviceFingerprint();
-    const proxyManager = new ProxyRotation(CONFIG.proxy);
 
     try {
         // Generuj losowy fingerprint dla tej sesji
         const fingerprint = fingerprintManager.generateFingerprint();
 
-        // Pobierz proxy (jeśli włączone)
-        const proxy = CONFIG.proxy.enabled ? proxyManager.getNextProxy() : null;
-
-        // Konfiguruj opcje Puppeteer z proxy
-        let puppeteerOptions = {
-            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        const puppeteerOptions = {
+            executablePath: getChromePath(),
             headless: false,
             args: [
-                '--disable-infobars',
+                // Flagi specyficzne dla scannera (wspolne flagi sa w account-manager)
                 '--window-position=0,0',
                 '--ignore-certificate-errors',
                 '--ignore-certificate-errors-spki-list',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process',
             ]
         };
 
-        if (CONFIG.proxy.enabled) {
-            puppeteerOptions = await proxyManager.configurePuppeteerWithProxy(puppeteerOptions, proxy);
+        // 🔒 Lock-file - zapobiega jednoczesnej pracy dwoch botow na jednym profilu Chrome
+        const browserLock = new BrowserLock(scannerAccount.folderPath);
+        if (!browserLock.acquire('fb-scanner-bot')) {
+            console.error('❌ Nie mozna uruchomic scannera - profil Chrome jest uzywany przez innego bota');
+            process.exit(1);
         }
 
         // 🆕 Browser isolation - użyj opcji z konta
-        const browserOptions = accountManager.getBrowserOptions(scannerAccount, puppeteerOptions);
+        const browserOptions = accountManager.getBrowserOptions(scannerAccount, 'scanner', puppeteerOptions);
         browser = await puppeteer.launch(browserOptions);
-        const page = await browser.newPage();
+        page = await browser.newPage();
 
         // Aplikuj fingerprint urządzenia
         await fingerprintManager.applyFingerprint(page, fingerprint);
 
-        // Ustaw losowe headers
-        const randomHeaders = proxyManager.getRandomHeaders();
-        await page.setExtraHTTPHeaders(randomHeaders);
-
-        // Symuluj warunki sieciowe
-        if (CONFIG.proxy.networkConditions) {
-            await proxyManager.simulateNetworkConditions(page, CONFIG.proxy.networkConditions);
-        }
-
-        // Dodatkowe ukrycie WebDriver
-        await page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            delete navigator.__proto__.webdriver;
-            delete window.chrome.runtime;
-        });
-
-        // Testuj proxy (jeśli włączone i skonfigurowane)
-        if (CONFIG.proxy.enabled && proxy && CONFIG.proxy.testOnStartup) {
-            const proxyWorks = await proxyManager.testProxy(browser, proxy);
-            if (!proxyWorks) {
-                proxyManager.markProxyFailed(proxy);
-                throw new Error(`Proxy test failed: ${proxy}`);
-            }
-        }
+        // navigator.webdriver jest obslugiwany przez:
+        // 1. --disable-blink-features=AutomationControlled (natywnie w Chrome)
+        // 2. puppeteer-extra-plugin-stealth
+        // NIE usuwamy recznie z prototypu - brak chrome.runtime/webdriver = sygnal bota
 
         // Załaduj cookies
         await loadCookies(page);
 
+        // ETAP 4.3: Rozgrzewka sesji PRZED nawigacja do grupy
+        await warmupSession(page);
+
         // Wejdź na stronę
         console.log(`🔗 Nawigacja do: ${targetGroup.url}`);
-        if (proxy) {
-            console.log(`🌐 Używam proxy: ${proxy}`);
-        }
 
-        await page.goto(targetGroup.url, { waitUntil: 'networkidle2', timeout: 60000 });
+        // ETAP 6.5: Referrer chain - nawigacja "z Facebooka" (warmup umieszcza nas na facebook.com)
+        await page.goto(targetGroup.url, { waitUntil: 'networkidle2', timeout: 60000, referer: 'https://www.facebook.com/' });
 
         // Losowe opóźnienie "rozruchowe"
         await sleep(humanDelay('afterPageLoad'));
@@ -1170,21 +1304,26 @@ async function runSingleSession(targetGroup, coordinator = null) {
             await scrapeFacebook(page, targetGroup);
         }
 
+        // ETAP 4.3: Schladzanie sesji PO skanowaniu
+        await cooldownSession(page);
+
         console.log('✅ Sesja zakończona sukcesem');
 
     } catch (error) {
         console.error('❌ Błąd sesji:', error);
 
-        // Oznacz proxy jako niedziałające jeśli błąd sieciowy
-        if (CONFIG.proxy.enabled && error.message.includes('proxy') || error.message.includes('timeout')) {
-            const proxy = proxyManager.getNextProxy();
-            proxyManager.markProxyFailed(proxy);
-        }
-
     } finally {
+        // ETAP 2.7: Zapisz cookies przed zamknieciem przegladarki
+        if (page && !page.isClosed()) {
+            await saveCookies(page);
+        }
         if (browser) {
             console.log('🔒 Zamykam przeglądarkę...');
             await browser.close();
+        }
+        // Zwolnij lock profilu Chrome
+        if (typeof browserLock !== 'undefined') {
+            browserLock.release('fb-scanner-bot');
         }
     }
 }

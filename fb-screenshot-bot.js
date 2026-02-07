@@ -1,4 +1,6 @@
 const AccountManager = require("./lib/account-manager");
+const { getChromePath } = require("./lib/account-manager");
+const BrowserLock = require("./lib/browser-lock");
 console.log('✅ Loaded fb-screenshot-bot.js V2 (Updated)');
 require('dotenv').config();
 const puppeteer = require('puppeteer-extra');
@@ -9,8 +11,11 @@ const path = require('path');
 const {
     humanDelay,
     checkBanRisk,
+    handleCheckpoint,
     sleep
 } = require('./lib/human-behavior');
+const { warmupSession } = require('./lib/session-warmup');
+const DeviceFingerprint = require('./lib/device-fingerprint');
 
 // Konfiguracja
 puppeteer.use(StealthPlugin());
@@ -40,6 +45,43 @@ if (!fs.existsSync(SCREENSHOTS_DIR)) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const SESSION_PATH = path.join(__dirname, screenshotAccount.paths.session, 'cookies.json');
+const LEARNING_PATH = path.resolve(__dirname, screenshotAccount.paths.learning || './learning-data');
+if (!fs.existsSync(LEARNING_PATH)) fs.mkdirSync(LEARNING_PATH, { recursive: true });
+
+/**
+ * ETAP 8: Logowanie alertu do Supabase (tabela alerts)
+ */
+async function logAlert(type, message, metadata = {}) {
+    try {
+        await supabase.from('alerts').insert({
+            type,
+            message,
+            metadata,
+            status: 'new',
+            created_at: new Date().toISOString()
+        });
+        console.log(`🚨 ALERT: [${type}] ${message}`);
+    } catch (err) {
+        console.error('⚠️ Blad zapisywania alertu:', err.message);
+    }
+}
+
+/**
+ * ETAP 2.7: Zapisuje cookies po kazdej sesji (odswiezanie sesji)
+ */
+async function saveCookies(page) {
+    try {
+        const cookies = await page.cookies();
+        if (cookies.length > 0) {
+            fs.writeFileSync(SESSION_PATH, JSON.stringify(cookies, null, 2));
+            console.log(`🍪 Zapisano ${cookies.length} cookies`);
+        }
+    } catch (err) {
+        console.error('⚠️ Blad zapisu cookies:', err.message);
+    }
+}
+
 /**
  * Ładuje ciasteczka (tym razem wewnątrz bota)
  */
@@ -58,15 +100,17 @@ async function loadCookiesForPage(page) {
 /**
  * Przetwarza pojedyncze zadanie (post)
  */
-async function processPost(post, browser) {
+async function processPost(post, browser, fingerprintManager, sessionFingerprint) {
     console.log(`📸 Przetwarzam post: ${post.id} (${post.post_url})`);
     const page = await browser.newPage();
 
     try {
-        await loadCookiesForPage(page);
+        // Aplikuj fingerprint urzadzenia (UA, viewport, timezone, canvas, WebGL, audio spoofing)
+        await fingerprintManager.applyFingerprint(page, sessionFingerprint);
 
-        // Ustawienie viewportu
-        await page.setViewport({ width: 1280, height: 800 });
+        // navigator.webdriver: obslugiwany przez --disable-blink-features + StealthPlugin
+
+        await loadCookiesForPage(page);
 
         // Walidacja URL
         if (!post.post_url || typeof post.post_url !== 'string' || !post.post_url.startsWith('http')) {
@@ -79,7 +123,17 @@ async function processPost(post, browser) {
 
         // Sprawdzenie bana
         if (await checkBanRisk(page)) {
-            throw new Error('Ban detected');
+            // ETAP 8: Obsluga checkpointu jak czlowiek
+            const checkpoint = await handleCheckpoint(page, async (alert) => {
+                await logAlert('checkpoint', alert.message, { url: alert.url, action: alert.action });
+            });
+            if (checkpoint.shouldStop) {
+                const cooldownUntil = new Date(Date.now() + checkpoint.cooldownHours * 60 * 60 * 1000);
+                const cooldownFile = path.join(LEARNING_PATH, 'cooldown-until.json');
+                fs.writeFileSync(cooldownFile, JSON.stringify({ until: cooldownUntil.toISOString() }));
+                console.log(`⛔ Bot zatrzymany na ${checkpoint.cooldownHours}h - wymagana reczna weryfikacja`);
+            }
+            throw new Error('Ban detected - checkpoint');
         }
 
         // Screenshot LOCAL
@@ -166,26 +220,48 @@ async function processPost(post, browser) {
             .eq('id', post.id);
 
     } finally {
+        // ETAP 2.7: Zapisz cookies przed zamknieciem strony
         if (!page.isClosed()) {
+            await saveCookies(page);
             await page.close();
         }
     }
 }
 
 /**
- * Główna pętla pollingu
+ * Główna pętla pollingu - architektura sesyjna
+ * Chrome i lock sa zajmowane TYLKO na czas aktywnej pracy (warmup + screenshoty + zamkniecie).
+ * Miedzy sesjami lock jest wolny - scanner moze dzialac.
  */
 async function runScreenshotBot() {
-    console.log('📸 Uruchamiam FB Screenshot Bot...');
+    console.log('📸 Uruchamiam FB Screenshot Bot (tryb sesyjny)...');
+
+    // ETAP 8.3: Sprawdz cooldown po checkpoincie
+    const cooldownFile = path.join(LEARNING_PATH, 'cooldown-until.json');
+    if (fs.existsSync(cooldownFile)) {
+        try {
+            const { until } = JSON.parse(fs.readFileSync(cooldownFile, 'utf8'));
+            if (new Date() < new Date(until)) {
+                const remaining = Math.ceil((new Date(until) - Date.now()) / 3600000);
+                console.log(`⛔ Bot w trybie cooldown - pozostalo ${remaining}h. Wymaga recznej weryfikacji checkpointu.`);
+                process.exit(0);
+            } else {
+                fs.unlinkSync(cooldownFile);
+                console.log('✅ Cooldown zakonczony - wznawianie pracy');
+            }
+        } catch (e) {
+            fs.unlinkSync(cooldownFile);
+        }
+    }
+
     console.log('   Czekam na zadania w Supabase...');
 
-    // 🆕 Browser isolation - użyj opcji z konta
-    const browserOptions = accountManager.getBrowserOptions(screenshotAccount, {
-        executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        headless: false, // FALSE: mniejsza szansa na checkpoint/ban (realistyczne)
+    // Opcje przegladarki przygotowane z gory (uzywane przy kazdej sesji)
+    const browserOptions = accountManager.getBrowserOptions(screenshotAccount, 'screenshot', {
+        executablePath: getChromePath(),
+        headless: false,
         args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
+            // Flagi specyficzne dla screenshot bota (wspolne flagi sa w account-manager)
             '--window-size=1280,800'
         ]
     });
@@ -193,22 +269,20 @@ async function runScreenshotBot() {
     let running = true;
 
     // Obsługa zamknięcia procesu
-    process.on('SIGINT', async () => {
+    process.on('SIGINT', () => {
         console.log('🛑 Zatrzymywanie bota...');
         running = false;
-        await browser.close();
-        process.exit();
     });
 
     while (running) {
         try {
-            // Pobierz 1 post "new" lub "processing" który utknął (opcjonalne, na razie tylko "new")
-            // Dla bezpieczeństwa bierzemy tylko te, które nie są 'done' ani 'error'
+            // Sprawdz Supabase BEZ uruchomionej przegladarki (lekkie zapytanie)
             const { data: posts, error } = await supabase
                 .from('posts')
                 .select('*')
                 .eq('status', 'new')
-                .limit(1);
+                .order('scraped_at', { ascending: true })
+                .limit(5);
 
             if (error) {
                 console.error('Błąd Supabase:', error.message);
@@ -217,19 +291,96 @@ async function runScreenshotBot() {
             }
 
             if (posts && posts.length > 0) {
-                const post = posts[0];
+                // Filtruj posty ktore przeczekaly wymagany delay (15-90 min)
+                const minDelayMs = 15 * 60 * 1000;
+                const maxDelayMs = 90 * 60 * 1000;
+                const maxWaitMs = 2 * 60 * 60 * 1000; // 2h - nie zostawiaj postow w nieskonczonosc
 
-                // Oznacz jako processing, żeby inny bot nie wziął
-                await supabase.from('posts').update({ status: 'processing' }).eq('id', post.id);
+                const postsToProcess = posts.filter(post => {
+                    const timeSince = Date.now() - new Date(post.scraped_at).getTime();
+                    const postHash = String(post.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                    const targetDelay = minDelayMs + (postHash % (maxDelayMs - minDelayMs));
+                    return timeSince >= targetDelay;
+                });
 
-                await processPost(post, browser);
+                const oldestTimeSince = Date.now() - new Date(posts[0].scraped_at).getTime();
+                const hasOldPost = oldestTimeSince >= maxWaitMs;
 
-                // Losowa pauza po pracy
-                await sleep(humanDelay('betweenActions'));
+                if (postsToProcess.length >= 2 || hasOldPost) {
+                    const batch = postsToProcess.length > 0 ? postsToProcess : [posts[0]];
+
+                    // === SESJA: lock → Chrome → warmup → screenshoty → zamknij → zwolnij lock ===
+                    const browserLock = new BrowserLock(screenshotAccount.folderPath);
+                    if (!browserLock.acquire('fb-screenshot-bot')) {
+                        console.log('⏳ Profil Chrome zajety przez scanner - ponawiam za 2 min...');
+                        await sleep(120000);
+                        continue;
+                    }
+
+                    let browser;
+                    try {
+                        browser = await puppeteer.launch(browserOptions);
+                        console.log('🌐 Przegladarka uruchomiona');
+
+                        // Fingerprint - generuj RAZ na cala sesje (identyczny na warmup i screenshoty)
+                        const fingerprintManager = new DeviceFingerprint();
+                        const sessionFingerprint = fingerprintManager.generateFingerprint();
+
+                        // Warmup sesji z fingerprintem
+                        const warmupPage = await browser.newPage();
+                        await fingerprintManager.applyFingerprint(warmupPage, sessionFingerprint);
+                        await loadCookiesForPage(warmupPage);
+                        await warmupSession(warmupPage);
+                        await saveCookies(warmupPage);
+                        await warmupPage.close();
+
+                        // Przetwarzaj batch screenshotow
+                        console.log(`📦 Przetwarzam grupe ${batch.length} postow`);
+                        for (let i = 0; i < batch.length; i++) {
+                            const post = batch[i];
+                            await supabase.from('posts').update({ status: 'processing' }).eq('id', post.id);
+                            await processPost(post, browser, fingerprintManager, sessionFingerprint);
+
+                            // Przerwa miedzy screenshotami: 30-120 sekund
+                            if (i < batch.length - 1) {
+                                const pauseMs = 30000 + Math.random() * 90000;
+                                console.log(`   ⏸️ Przerwa ${Math.round(pauseMs / 1000)}s przed nastepnym...`);
+                                await sleep(pauseMs);
+                            }
+                        }
+
+                        console.log('✅ Sesja screenshotow zakonczona');
+                    } finally {
+                        if (browser) {
+                            console.log('🔒 Zamykam przeglądarkę...');
+                            await browser.close();
+                        }
+                        browserLock.release('fb-screenshot-bot');
+                    }
+                    // === KONIEC SESJI - lock zwolniony ===
+
+                    // Po sesji: czekaj 5-15 minut przed kolejnym sprawdzeniem
+                    const cooldownMs = 300000 + Math.random() * 600000;
+                    console.log(`😴 Nastepne sprawdzenie za ${Math.round(cooldownMs / 60000)} min`);
+                    await sleep(cooldownMs);
+
+                } else if (postsToProcess.length === 1) {
+                    const remaining = Math.ceil((maxWaitMs - oldestTimeSince) / 60000);
+                    console.log(`⏳ 1 post gotowy, czekam na wiecej (lub ${remaining} min do wymuszenia)`);
+                    await sleep(30000);
+                } else {
+                    const nextPost = posts[0];
+                    const timeSince = Date.now() - new Date(nextPost.scraped_at).getTime();
+                    const postHash = String(nextPost.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                    const targetDelay = minDelayMs + (postHash % (maxDelayMs - minDelayMs));
+                    const remaining = Math.ceil((targetDelay - timeSince) / 60000);
+                    console.log(`⏳ Najblizszy post za ${remaining} min`);
+                    await sleep(30000);
+                }
             } else {
-                // Brak zadań - czekaj dłużej
+                // Brak postow - sprawdzaj co minute
                 process.stdout.write('.');
-                await sleep(5000);
+                await sleep(60000);
             }
 
         } catch (err) {

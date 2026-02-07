@@ -1,0 +1,31 @@
+{
+    "accountType": "main",
+    "accountName": "main-account",
+    "accountDescription": "Glowne konto Facebook - wspolne dla scanner i screenshot bota",
+    "facebookProfile": {
+        "email": "UZUPELNIC_EMAIL_KLIENTA",
+        "name": "main-account"
+    },
+    "paths": {
+        "session": "../accounts/main-account/fb-session",
+        "cache": "../accounts/main-account/cache",
+        "learning": "../accounts/main-account/learning-data",
+        "screenshots": "../accounts/main-account/screenshots",
+        "browserProfile": "../accounts/main-account/browser-profile",
+        "logs": "../accounts/main-account/logs"
+    },
+    "capabilities": [
+        "scraping",
+        "processing"
+    ],
+    "browserConfig": {
+        "headless": false,
+        "windowSize": { "width": 1366, "height": 768 }
+    },
+    "settings": {
+        "maxSessionsPerHour": 3,
+        "maxPostsPerSession": 15,
+        "enableScreenshots": true,
+        "enableLearning": true
+    }
+}
