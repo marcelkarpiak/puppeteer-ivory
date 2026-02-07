@@ -1261,7 +1261,16 @@ async function runSingleSession(targetGroup, coordinator = null) {
         // NIE usuwamy recznie z prototypu - brak chrome.runtime/webdriver = sygnal bota
 
         // ETAP 4.3: Rozgrzewka sesji PRZED nawigacja do grupy
-        await warmupSession(page);
+        const warmupResult = await warmupSession(page);
+        if (!warmupResult.loggedIn) {
+            console.error('❌ SESJA PRZERWANA: Uzytkownik nie jest zalogowany na Facebooku!');
+            console.error('   👉 Zaloguj sie recznie w profilu Chrome i uruchom ponownie.');
+            await logAlert('auth_error', 'Bot nie jest zalogowany na Facebooku', {
+                group: targetGroup.name,
+                action: 'Wymagane reczne logowanie w profilu Chrome'
+            });
+            return;
+        }
 
         // Wejdź na stronę
         console.log(`🔗 Nawigacja do: ${targetGroup.url}`);
