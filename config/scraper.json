@@ -33,12 +33,12 @@
             "enabled": true,
             "strategy": "randomized",
             "startRange": {
-                "min": "07:30",
-                "max": "09:30"
+                "min": "06:00",
+                "max": "07:00"
             },
             "endRange": {
-                "min": "16:30",
-                "max": "18:30"
+                "min": "23:00",
+                "max": "23:59"
             },
             "peakHours": [
                 {
@@ -60,9 +60,11 @@
                 "tuesday",
                 "wednesday",
                 "thursday",
-                "friday"
+                "friday",
+                "saturday",
+                "sunday"
             ],
-            "weekendReduction": 0
+            "weekendReduction": 1.0
         },
         "stateTracking": {
             "enabled": true,

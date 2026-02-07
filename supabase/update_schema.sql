@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE TABLE IF NOT EXISTS bot_instances (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   type TEXT,
   status TEXT DEFAULT 'offline',
   last_heartbeat TIMESTAMPTZ,

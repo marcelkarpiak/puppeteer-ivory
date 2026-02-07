@@ -1120,9 +1120,8 @@ async function runBot() {
         console.warn('⚠️ Kontynuuję bez rejestracji w monitoringu (błąd rejestracji)');
     }
 
-    // Inicjalizuj Distributed Coordinator
+    // Inicjalizuj Distributed Coordinator (initialize() wywoływane automatycznie w konstruktorze)
     const coordinator = new DistributedCoordinator(CONFIG.distributed || {});
-    await coordinator.initialize();
 
     const sessionManager = new SessionManager(CONFIG);
     let dailySessionCount = 0;
