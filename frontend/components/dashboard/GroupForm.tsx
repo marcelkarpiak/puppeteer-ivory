@@ -36,7 +36,7 @@ interface GroupFormProps {
     targetUserId?: string
 }
 
-const FB_GROUP_REGEX = /^https?:\/\/(www\.)?facebook\.com\/groups\/[\w.-]+\/?$/
+const GROUP_REGEX = /^https?:\/\/(www\.)?facebook\.com\/groups\/[\w.-]+\/?$/
 
 export default function GroupForm({
     open,
@@ -83,8 +83,8 @@ export default function GroupForm({
             return
         }
 
-        if (!FB_GROUP_REGEX.test(url.trim())) {
-            toast.error('Nieprawidłowy link do grupy Facebook (musi zawierać /groups/)')
+        if (!GROUP_REGEX.test(url.trim())) {
+            toast.error('Nieprawidłowy link do grupy (musi zawierać /groups/)')
             return
         }
 
@@ -148,7 +148,7 @@ export default function GroupForm({
                         <DialogDescription>
                             {isEditing
                                 ? 'Zmień dane grupy lub przypisz do innej kategorii'
-                                : 'Dodaj nową grupę Facebook do monitorowania'}
+                                : 'Dodaj nową grupę do monitorowania'}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -165,7 +165,7 @@ export default function GroupForm({
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="url">Link do grupy (Facebook)</Label>
+                            <Label htmlFor="url">Link do grupy</Label>
                             <Input
                                 id="url"
                                 value={url}

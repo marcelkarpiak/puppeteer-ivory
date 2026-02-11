@@ -22,7 +22,7 @@ export default function BotControl() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Activity className="w-5 h-5 text-blue-600" />
-              <CardTitle>FB Bot</CardTitle>
+              <CardTitle>Scraper Bot</CardTitle>
             </div>
             <Badge
               variant={botStatus === 'running' ? 'default' : 'secondary'}
@@ -39,7 +39,7 @@ export default function BotControl() {
             </Badge>
           </div>
           <CardDescription>
-            Skanuje grupy Facebook, robi screenshoty pasujacych postow i uploaduje do Storage
+            Skanuje grupy, robi screenshoty pasujacych postow i uploaduje do Storage
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -110,7 +110,7 @@ export default function BotControl() {
         <CardContent className="space-y-4">
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <h4 className="font-semibold mb-2">1. Przygotowanie sesji Facebook</h4>
+              <h4 className="font-semibold mb-2">1. Przygotowanie sesji</h4>
               <p className="text-sm text-muted-foreground mb-2">
                 Zaloguj sie na konto w profilu Chrome (userDataDir).
               </p>

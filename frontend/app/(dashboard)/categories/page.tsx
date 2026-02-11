@@ -152,7 +152,7 @@ export default function CategoriesPage() {
               Kategorie
             </h1>
             <p className="text-muted-foreground mt-2">
-              Zarządzaj kategoriami dla grup Facebook i słów kluczowych
+              Zarządzaj kategoriami dla grup i słów kluczowych
             </p>
           </div>
           <div className="flex items-center gap-3">

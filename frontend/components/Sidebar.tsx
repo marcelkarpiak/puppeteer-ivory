@@ -133,9 +133,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             <div className={cn("px-3 py-2", collapsed ? "px-2" : "px-3")}>
                 <div className={cn("flex items-center mb-6 px-2", collapsed ? "justify-center" : "justify-start")}>
                     <h2 className={cn("text-lg font-semibold tracking-tight transition-all duration-300", collapsed ? "hidden" : "block")}>
-                        FB Scraper
+                        Scraper
                     </h2>
-                    {collapsed && <span className="font-bold text-xl">FB</span>}
+                    {collapsed && <span className="font-bold text-xl">SC</span>}
                 </div>
 
                 <div className="space-y-1">

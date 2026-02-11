@@ -46,7 +46,7 @@ export default function LoginPage() {
     return (
         <Card className="w-full border-t-4 border-t-blue-600 shadow-lg">
             <CardHeader className="space-y-1 text-center">
-                <CardTitle className="text-2xl font-bold">Facebook Scraper</CardTitle>
+                <CardTitle className="text-2xl font-bold">Scraper Panel</CardTitle>
                 <CardDescription>
                     Zaloguj się, aby uzyskać dostęp do panelu
                 </CardDescription>

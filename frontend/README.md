@@ -1,6 +1,6 @@
-# Facebook Scraper Dashboard
+# Scraper Dashboard
 
-Nowoczesny panel zarządzania dla systemu automatycznego skanowania grup Facebook.
+Nowoczesny panel zarządzania dla systemu automatycznego skanowania grup.
 
 ## 🚀 Funkcje
 
@@ -95,7 +95,7 @@ node fb-bot.js
 
 ## 🔄 Workflow
 
-1. **FB Bot** skanuje grupę FB → filtruje według słów kluczowych → robi screenshot inline → uploaduje do Storage → zapisuje do Supabase (status: `done`)
+1. **Scraper Bot** skanuje grupę → filtruje według słów kluczowych → robi screenshot inline → uploaduje do Storage → zapisuje do Supabase (status: `done`)
 2. **Dashboard** wyświetla posty `done` → pracownik oznacza jako `processed` lub `rejected`
 
 ## 🎨 Stack technologiczny

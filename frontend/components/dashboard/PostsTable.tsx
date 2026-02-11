@@ -337,7 +337,7 @@ export default function PostsTable({ posts, categories = [], loading, onRefresh 
                   className="flex-1"
                 >
                   <ExternalLink className="w-4 h-4 mr-2" />
-                  Otwórz na Facebook
+                  Otwórz źródło
                 </Button>
                 {selectedPost.status === 'done' && (
                   <>

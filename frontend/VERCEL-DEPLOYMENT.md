@@ -16,10 +16,10 @@ Instrukcja wrzucenia frontendu na Vercel (darmowy hosting).
 # W katalogu głównego projektu
 git init
 git add .
-git commit -m "Initial commit - Facebook Scraper Dashboard"
+git commit -m "Initial commit - Scraper Dashboard"
 
 # Stwórz repo na GitHub i pushuj
-git remote add origin https://github.com/twoj-username/facebook-scraper.git
+git remote add origin https://github.com/twoj-username/scraper-dashboard.git
 git push -u origin main
 ```
 

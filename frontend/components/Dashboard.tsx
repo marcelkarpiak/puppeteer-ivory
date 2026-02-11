@@ -331,10 +331,10 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">
-              Facebook Scraper Dashboard
+              Scraper Dashboard
             </h1>
             <p className="text-muted-foreground mt-2">
-              Zarządzaj postami z grup Facebook - automatyczne skanowanie i screenshoty
+              Zarządzaj postami z grup - automatyczne skanowanie i screenshoty
             </p>
           </div>
           <Badge variant="outline" className="text-lg px-4 py-2">

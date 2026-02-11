@@ -7,8 +7,8 @@ import { AuthProvider } from "@/lib/auth-context";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FB Scraper Dashboard",
-  description: "Zarządzaj postami z grup Facebook",
+  title: "Scraper Dashboard",
+  description: "Zarządzaj postami z grup",
 };
 
 export default function RootLayout({

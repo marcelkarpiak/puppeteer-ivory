@@ -144,7 +144,7 @@ export default function GroupsPage() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                            Grupy Facebook
+                            Grupy
                         </h1>
                         <p className="text-muted-foreground mt-2">
                             {isAdmin

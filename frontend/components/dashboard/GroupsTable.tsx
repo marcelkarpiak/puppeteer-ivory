@@ -148,7 +148,7 @@ export default function GroupsTable({
                 <CardContent className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                     <Users className="w-12 h-12 mb-4" />
                     <p className="text-lg font-medium">Brak grup</p>
-                    <p className="text-sm">Dodaj pierwszą grupę Facebook, aby rozpocząć monitorowanie</p>
+                    <p className="text-sm">Dodaj pierwszą grupę, aby rozpocząć monitorowanie</p>
                 </CardContent>
             </Card>
         )
@@ -206,7 +206,7 @@ export default function GroupsTable({
                                                 rel="noopener noreferrer"
                                                 className="flex items-center text-blue-600 hover:underline"
                                             >
-                                                FB <ExternalLink className="w-3 h-3 ml-1" />
+                                                Link <ExternalLink className="w-3 h-3 ml-1" />
                                             </a>
                                         </TableCell>
                                         <TableCell>
