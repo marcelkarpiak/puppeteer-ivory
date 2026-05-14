@@ -1,25 +1,4 @@
 {
-    "groups": [
-        {
-            "url": "https://www.facebook.com/groups/mywpolsce",
-            "name": "mywpolsce"
-        },
-        {
-            "url": "https://www.facebook.com/groups/polska.w.uk",
-            "name": "polska.w.uk"
-        },
-        {
-            "url": "https://www.facebook.com/groups/polacy.w.anglii",
-            "name": "polacy.w.anglii"
-        }
-    ],
-    "group": {
-        "url": "https://www.facebook.com/groups/mywpolsce",
-        "name": "mywpolsce"
-    },
-    "n8n": {
-        "webhookUrl": "https://n8n-ivorylab.pl/webhook/fb-scraper"
-    },
     "safety": {
         "maxPostsPerSession": {
             "min": 5,

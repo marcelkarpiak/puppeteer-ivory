@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Facebook group monitoring system: a Puppeteer bot scrapes Facebook groups for keyword-matched posts, takes screenshots, stores data in Supabase, and sends webhooks to n8n. A Next.js dashboard provides CRUD management of groups, keywords, categories, and bot monitoring.
+IvoryLab Facebook group monitoring system for lead generation (voicebots, chatbots, automation, custom software, AI services). A Puppeteer bot scrapes Facebook groups for keyword-matched posts, takes screenshots, and stores data in Supabase. A Next.js dashboard provides CRUD management of groups, keywords, categories, and bot monitoring.
+
+Full docs in `docs/` (ARCHITECTURE, SETUP, OPERATIONS).
 
 ## Commands
 
@@ -64,19 +66,18 @@ npm run lint --prefix frontend   # ESLint
 
 ### Database (Supabase)
 
-Schema in `supabase/schema.sql`. Key tables: `posts`, `groups`, `keywords`, `categories`, `alerts`, `bot_instances`, `user_profiles`, `scraper_sessions`. All tables have RLS enabled — bot uses service role key, dashboard uses anon key with auth.
+Schema in `supabase/setup_complete.sql`. Key tables: `posts`, `groups`, `keywords`, `categories`, `alerts`, `bot_instances`, `user_profiles`, `processed_posts`. All tables have RLS enabled — bot uses service role key, dashboard uses anon key with auth.
 
-Triggers auto-create `user_profiles` on auth signup and seed default categories.
+Triggers auto-create `user_profiles` on auth signup and seed default categories (Voiceboty, Chatboty, Automatyzacje, Custom Software, AI / ML, Inne).
 
 Screenshots stored in Supabase Storage bucket `screenshots` (public).
 
 ### Data Flow
 
-1. Bot fetches active groups + keywords from Supabase (falls back to `config/scraper.json` + `config/keywords.json`)
+1. Bot fetches active groups + keywords from Supabase. If empty, session is skipped with a warning — there is no JSON fallback (configure via dashboard).
 2. For each post: extract content → `matchKeywords()` → if matched: expand post → `postHandle.screenshot()` → upload to Supabase Storage → save post with `status: 'done'` and `screenshot_url`
 3. If screenshot fails: post saved with `status: 'new'`, `screenshot_url: null`
-4. Also sends to n8n webhook (optional)
-5. Bot registers itself in `bot_instances`, sends heartbeat every 60s
+4. Bot registers itself in `bot_instances`, sends heartbeat every 60s
 
 ## Environment Variables
 
@@ -100,4 +101,8 @@ Screenshots stored in Supabase Storage bucket `screenshots` (public).
 
 ## Account Configuration
 
-Accounts live in `accounts/<name>/config.json` with type `main`/`scanner`/`screenshot`. The `AccountManager` class discovers them automatically. Each account has isolated paths for browser profile, cache, learning data, screenshots, and logs.
+Accounts live in `accounts/<name>/config.json` with type `main`. The `AccountManager` class discovers them automatically. Each account has isolated paths for browser profile, cache, learning data, screenshots, and logs.
+
+## Config Files
+
+`config/scraper.json` contains ONLY safety/timing settings (active hours, intervals, fault tolerance, distributed coordinator). Groups, keywords, and categories are managed exclusively through the Supabase dashboard — there is no `config/keywords.json`.

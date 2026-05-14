@@ -1,17 +1,17 @@
 {
-  "name": "puppeteer-n8n-demo",
+  "name": "ivorylab-fb-scraper",
   "version": "1.0.0",
-  "description": "Demo integracji Puppeteer z n8n - scraper wysyłający dane przez webhook",
-  "main": "scraper-with-n8n.js",
+  "description": "IvoryLab Facebook group scraper - lead generation for AI/automation services",
+  "main": "fb-bot.js",
   "scripts": {
-    "dev": "npm run dev --prefix frontend",
-    "start": "node scraper-with-n8n.js"
+    "start": "node fb-bot.js",
+    "dev": "npm run dev --prefix frontend"
   },
   "keywords": [
     "puppeteer",
-    "n8n",
     "scraper",
-    "webhook",
+    "facebook",
+    "lead-generation",
     "automation"
   ],
   "author": "IvoryLab",

@@ -51,7 +51,6 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 puppeteer.use(StealthPlugin());
 
 const CONFIG = require('./config/scraper.json');
-const KEYWORDS_JSON = require('./config/keywords.json'); // Fallback
 
 // Cache dla danych z bazy (odświeżane co sesję)
 let dbGroups = null;
@@ -238,7 +237,7 @@ async function fetchGroupsFromDB() {
         }
 
         if (!groups || groups.length === 0) {
-            console.log('⚠️ Brak aktywnych grup w bazie - używam config/scraper.json');
+            console.log('⚠️ Brak aktywnych grup w bazie - dodaj grupy w dashboardzie');
             return null;
         }
 
@@ -257,7 +256,6 @@ async function fetchGroupsFromDB() {
 
 /**
  * Pobiera aktywne słowa kluczowe z bazy danych
- * Fallback na config/keywords.json jeśli baza pusta lub błąd
  */
 async function fetchKeywordsFromDB() {
     try {
@@ -272,7 +270,7 @@ async function fetchKeywordsFromDB() {
         }
 
         if (!keywords || keywords.length === 0) {
-            console.log('⚠️ Brak aktywnych słów kluczowych w bazie - używam config/keywords.json');
+            console.log('⚠️ Brak aktywnych słów kluczowych w bazie - dodaj słowa kluczowe w dashboardzie');
             return null;
         }
 
@@ -341,10 +339,8 @@ async function refreshDataFromDB() {
 
 /**
  * Losuje grupę docelową z dostępnej puli
- * Priorytet: grupy z bazy > grupy z CONFIG > pojedyncza grupa z CONFIG
  */
 function getRandomGroup() {
-    // 1. Najpierw sprawdź grupy z bazy
     if (dbGroups && dbGroups.length > 0) {
         const randomIndex = Math.floor(Math.random() * dbGroups.length);
         const group = dbGroups[randomIndex];
@@ -357,14 +353,7 @@ function getRandomGroup() {
         };
     }
 
-    // 2. Fallback na grupy z CONFIG (JSON)
-    if (CONFIG.groups && CONFIG.groups.length > 0) {
-        const randomIndex = Math.floor(Math.random() * CONFIG.groups.length);
-        return CONFIG.groups[randomIndex];
-    }
-
-    // 3. Fallback do pojedynczej grupy z CONFIG
-    return CONFIG.group;
+    return null;
 }
 
 /**
@@ -375,7 +364,6 @@ function getRandomGroup() {
 function selectGroupsForSession() {
     let allGroups = [];
 
-    // 1. Grupy z bazy
     if (dbGroups && dbGroups.length > 0) {
         allGroups = dbGroups.map(g => ({
             id: g.id,
@@ -384,14 +372,9 @@ function selectGroupsForSession() {
             category_id: g.category_id,
             user_id: g.user_id
         }));
-    }
-    // 2. Fallback na grupy z CONFIG
-    else if (CONFIG.groups && CONFIG.groups.length > 0) {
-        allGroups = CONFIG.groups;
-    }
-    // 3. Fallback na pojedyncza grupe
-    else {
-        return [CONFIG.group];
+    } else {
+        console.log('⚠️ Brak grup — sesja pominięta');
+        return [];
     }
 
     // Jesli tylko 1 grupa dostepna - zwroc ja
@@ -450,16 +433,6 @@ function matchKeywords(text) {
                 if (!categoryMatch) {
                     categoryMatch = kw.category_name || 'Inne';
                     categoryId = kw.category_id;
-                }
-            }
-        }
-    } else {
-        // 2. Fallback na słowa z JSON
-        for (const [category, data] of Object.entries(KEYWORDS_JSON.categories)) {
-            for (const keyword of data.keywords) {
-                if (lowerText.includes(keyword.toLowerCase())) {
-                    foundKeywords.push(keyword);
-                    if (!categoryMatch) categoryMatch = category;
                 }
             }
         }
@@ -538,84 +511,6 @@ async function savePostToSupabase(postData, targetGroup = null, screenshotUrl = 
 }
 
 /**
- * Wysyła dane do n8n
- */
-async function sendToN8n(data) {
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const response = await fetch(CONFIG.n8n.webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-            console.log('   ✅ Wysłano do n8n!');
-            return true;
-        } else {
-            console.log(`   ⚠️ n8n zwrócił błąd: ${response.status}`);
-            return false;
-        }
-    } catch (error) {
-        console.error(`   ❌ Błąd wysyłania do n8n: ${error.message}`);
-        return false;
-    }
-}
-
-/**
- * Logika scrapowania dla Reddita (Mock Mode)
- */
-async function scrapeReddit(page) {
-    console.log('🤖 Tryb MOCK: Scrapowanie Reddita...');
-
-    await humanScroll(page);
-
-    const posts = await page.$$('div.thing.link');
-    console.log(`🔎 Znaleziono ${posts.length} potencjalnych postów.`);
-
-    let processedCount = 0;
-
-    for (const postHandle of posts) {
-        if (processedCount >= CONFIG.safety.maxPostsPerSession) break;
-
-        const data = await page.evaluate(el => {
-            const titleEl = el.querySelector('a.title');
-            const authorEl = el.querySelector('a.author');
-            const timeEl = el.querySelector('time');
-            return {
-                title: titleEl ? titleEl.innerText : '',
-                url: titleEl ? titleEl.href : '',
-                author: authorEl ? authorEl.innerText : 'unknown',
-                postedAt: timeEl ? timeEl.getAttribute('datetime') : new Date().toISOString()
-            };
-        }, postHandle);
-
-        const textToAnalyze = data.title; // Na liście reddita głównie tytuły
-        const matchResult = matchKeywords(textToAnalyze);
-
-        if (matchResult.matched) {
-            console.log(`   🎯 TRAFIENIE: "${data.title.substring(0, 30)}..." [${matchResult.keywords.join(', ')}]`);
-
-            await sendToN8n({
-                source: 'Reddit Mock',
-                ...data,
-                matchedKeywords: matchResult.keywords,
-                category: matchResult.category,
-                scrapedAt: new Date().toISOString()
-            });
-            processedCount++;
-        }
-
-        // Małe opóźnienie między przetwarzaniem elementów DOM (symulacja czytania)
-        if (Math.random() > 0.8) await sleep(500);
-    }
-}
-
-/**
  * Rozwija obciete posty klikajac "Zobacz wiecej" / "See more"
  */
 async function expandTruncatedPost(postHandle) {
@@ -686,7 +581,7 @@ async function takePostScreenshot(postHandle, postId) {
  * Logika scrapowania dla Facebooka
  */
 async function scrapeFacebook(page, targetGroup = null) {
-    const groupName = targetGroup ? targetGroup.name : CONFIG.group.name;
+    const groupName = targetGroup ? targetGroup.name : 'Unknown Group';
     console.log('👤 Tryb LIVE: Scrapowanie Facebooka...');
 
     // Inicjalizuj zachowania bezczynności
@@ -897,21 +792,6 @@ async function scrapeFacebook(page, targetGroup = null) {
                                 category: matchResult.category,
                                 category_id: matchResult.category_id
                             }, targetGroup, screenshotResult.screenshotUrl);
-
-                            // Wyślij do n8n z Fault Tolerance (opcjonalne - jeśli używasz n8n)
-                            await faultTolerance.executeWithRetry(async () => {
-                                await sendToN8n({
-                                    source: 'Facebook Group',
-                                    groupName: groupName,
-                                    ...data,
-                                    post_url: data.url,
-                                    content: data.textContent,
-                                    matchedKeywords: matchResult.keywords,
-                                    category: matchResult.category,
-                                    screenshot_url: screenshotResult.screenshotUrl,
-                                    scrapedAt: new Date().toISOString()
-                                });
-                            }, 'send_to_n8n', { postId: data.externalId });
 
                             // Symuluj czytanie po znalezieniu
                             await idleBehaviors.simulateReading(2000);
@@ -1281,12 +1161,7 @@ async function runSingleSession(targetGroup, coordinator = null) {
         // Losowe opóźnienie "rozruchowe"
         await sleep(humanDelay('afterPageLoad'));
 
-        // Wybór trybu
-        if (targetGroup.isMock || targetGroup.url.includes('reddit')) {
-            await scrapeReddit(page);
-        } else {
-            await scrapeFacebook(page, targetGroup);
-        }
+        await scrapeFacebook(page, targetGroup);
 
         // ETAP 4.3: Schladzanie sesji PO skanowaniu
         await cooldownSession(page);

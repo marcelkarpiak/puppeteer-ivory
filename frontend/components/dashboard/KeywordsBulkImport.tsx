@@ -192,7 +192,7 @@ export default function KeywordsBulkImport({
                             id="keywords-text"
                             value={text}
                             onChange={(e) => setText(e.target.value)}
-                            placeholder={`praca kierowca\ntłumacz przysięgły\nkarta pobytu\nvisa\nlegalizacja`}
+                            placeholder={`potrzebuję chatbota\nvoicebot\nautomatyzacja procesów\ncustom software\nai agent`}
                             rows={8}
                             className="font-mono text-sm"
                         />

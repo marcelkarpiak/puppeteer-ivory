@@ -332,10 +332,11 @@ RETURNS TRIGGER AS $$
 BEGIN
     INSERT INTO categories (user_id, name, color, is_default)
     VALUES
-        (NEW.id, 'Tłumaczenia', '#3B82F6', true),
-        (NEW.id, 'Praca', '#10B981', true),
-        (NEW.id, 'Wizy', '#F59E0B', true),
-        (NEW.id, 'Dokumenty', '#8B5CF6', true),
+        (NEW.id, 'Voiceboty', '#3B82F6', true),
+        (NEW.id, 'Chatboty', '#10B981', true),
+        (NEW.id, 'Automatyzacje', '#F59E0B', true),
+        (NEW.id, 'Custom Software', '#8B5CF6', true),
+        (NEW.id, 'AI / ML', '#EC4899', true),
         (NEW.id, 'Inne', '#6B7280', true);
     RETURN NEW;
 END;
