@@ -1,21 +1,35 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-puppeteer.use(StealthPlugin());
+const { connect } = require('puppeteer-real-browser');
 
 (async () => {
-    console.log('Testing STEALTH Puppeteer...');
+    console.log('Testing puppeteer-real-browser stealth...');
+    let browser;
     try {
-        const browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox']
+        const result = await connect({
+            headless: false,
+            disableXvfb: true,
+            connectOption: { defaultViewport: null },
         });
-        console.log('✅ STEALTH Puppeteer launched successfully!');
-        const page = await browser.newPage();
+        browser = result.browser;
+        const page = result.page;
+
+        console.log('✅ puppeteer-real-browser launched successfully!');
         await page.goto('https://example.com');
         console.log('✅ Page loaded');
-        await browser.close();
+
+        // Sprawdź podstawowe sygnały wykrywalności
+        const checks = await page.evaluate(() => ({
+            webdriver: navigator.webdriver,
+            chrome: !!window.chrome,
+            languages: navigator.languages.length,
+        }));
+        console.log('🔍 Detection checks:', checks);
+        console.log(checks.webdriver === false || checks.webdriver === undefined
+            ? '✅ navigator.webdriver nie wykryty'
+            : '⚠️ navigator.webdriver = true');
+
     } catch (e) {
-        console.error('❌ STEALTH Puppeteer failed:', e);
+        console.error('❌ Test failed:', e.message);
+    } finally {
+        if (browser) await browser.close();
     }
 })();

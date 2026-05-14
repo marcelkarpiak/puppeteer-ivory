@@ -30,9 +30,9 @@ npm run lint --prefix frontend   # ESLint
 
 ### Two Independent Systems
 
-**1. Bot (`fb-bot.js`)** — Node.js process using puppeteer-extra with stealth plugin.
+**1. Bot (`fb-bot.js`)** — Node.js process using `puppeteer-real-browser` (fixes CDP Runtime.Enable leak, replaces puppeteer-extra + stealth plugin).
 - Runs in a `while(true)` loop: session manager controls timing (active hours, working days, break-in ramp-up)
-- Each session: acquire browser lock → launch Chrome with shared profile (`userDataDir`) → warmup on facebook.com → navigate to 1-2 random groups → scan feed → keyword match → screenshot + upload → save to Supabase → cooldown → release lock
+- Each session: acquire browser lock → `connect()` Chrome with shared profile (`userDataDir`) → warmup on facebook.com → navigate to 1-2 random groups → scan feed → keyword match → screenshot + upload → save to Supabase → cooldown → release lock
 - Uses `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS (falls back to anon key with warning)
 - Exports `runSingleSession()` for the distributed coordinator
 
@@ -46,7 +46,7 @@ npm run lint --prefix frontend   # ESLint
 
 | Module | Purpose |
 |--------|---------|
-| `account-manager.js` | Loads account configs from `accounts/*/config.json`, provides `getChromePath()`, `getBrowserOptions()` with `defaultViewport: null` + `--start-maximized` |
+| `account-manager.js` | Loads account configs from `accounts/*/config.json`, provides `getChromePath()`, `getBrowserOptions()` — used to extract `userDataDir` for `connect()` |
 | `browser-lock.js` | File-based lock preventing concurrent Chrome profile access (PID-checked, auto-cleanup) |
 | `session-manager.js` | Active hours, working days, peak hours scheduling |
 | `session-warmup.js` | Pre-scan warmup: browse newsfeed, check notifications (also verifies login status) |
@@ -68,7 +68,7 @@ npm run lint --prefix frontend   # ESLint
 
 Schema in `supabase/setup_complete.sql`. Key tables: `posts`, `groups`, `keywords`, `categories`, `alerts`, `bot_instances`, `user_profiles`, `processed_posts`. All tables have RLS enabled — bot uses service role key, dashboard uses anon key with auth.
 
-Triggers auto-create `user_profiles` on auth signup and seed default categories (Voiceboty, Chatboty, Automatyzacje, Custom Software, AI / ML, Inne).
+Triggers auto-create `user_profiles` on auth signup. Default categories (Voiceboty, Chatboty, Automatyzacje, Custom Software) are inserted manually via Supabase dashboard or SQL — the trigger seeds different values depending on project setup.
 
 Screenshots stored in Supabase Storage bucket `screenshots` (public).
 
@@ -92,8 +92,9 @@ Screenshots stored in Supabase Storage bucket `screenshots` (public).
 
 ## Critical Patterns
 
-- **No JSON cookies**: Bot uses `userDataDir` for Chrome profile persistence (SQLite-based). There are no `saveCookies`/`loadCookies` functions.
-- **`defaultViewport: null`**: Chrome manages its own viewport via `--start-maximized`. Never set viewport dimensions in Puppeteer options.
+- **No JSON cookies**: Bot uses `userDataDir` for Chrome profile persistence (SQLite-based). There are no `saveCookies`/`loadCookies` functions. First-time login must be done manually by opening Chrome with the same `--user-data-dir` and logging into Facebook.
+- **`puppeteer-real-browser` not `puppeteer-extra`**: Browser is launched via `connect({ customConfig, args, connectOption })`, not `puppeteer.launch()`. This fixes the CDP `Runtime.Enable` leak detected by anti-bot systems since mid-2024. Do not re-introduce `puppeteer-extra` or `puppeteer-extra-plugin-stealth`.
+- **`defaultViewport: null`**: Chrome manages its own viewport via `--start-maximized`. Never set viewport dimensions. `page.viewport()` returns `null` — use `window.innerWidth` / `window.innerHeight` via `page.evaluate()` when window size is needed (see `humanMouseMove` in `human-behavior.js`).
 - **Fingerprint philosophy**: `device-fingerprint.js` does NOT override hardware values (CPU, RAM, screen, WebGL). Only timezone, language, platform, and CDP evasion markers. Overriding hardware creates detectable inconsistencies.
 - **Variable scoping in sessions**: `page` and `browserLock` must be declared before the try block in `runSingleSession()` so they're accessible in the `finally` block for cleanup.
 - **Social interactions on keyword posts**: NEVER. `social-interactions.js` budget applies only to non-keyword-matched posts.

@@ -3,8 +3,7 @@ const os = require('os'); // Added for hostname
 const AccountManager = require("./lib/account-manager");
 const { getChromePath } = require("./lib/account-manager");
 const BrowserLock = require("./lib/browser-lock");
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { connect } = require('puppeteer-real-browser');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -46,9 +45,6 @@ if (!supabaseServiceKey) {
     console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY nie ustawiony - używam ANON_KEY (może nie działać z RLS)');
 }
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Konfiguracja
-puppeteer.use(StealthPlugin());
 
 const CONFIG = require('./config/scraper.json');
 
@@ -1112,14 +1108,6 @@ async function runSingleSession(targetGroup, coordinator = null) {
     const fingerprintManager = new DeviceFingerprint();
 
     try {
-        const puppeteerOptions = {
-            executablePath: getChromePath(),
-            headless: false,
-            args: [
-                '--window-position=0,0',
-            ]
-        };
-
         // 🔒 Lock-file - zapobiega jednoczesnej pracy dwoch botow na jednym profilu Chrome
         browserLock = new BrowserLock(scannerAccount.folderPath);
         if (!browserLock.acquire('fb-bot')) {
@@ -1127,18 +1115,36 @@ async function runSingleSession(targetGroup, coordinator = null) {
             return;
         }
 
-        // 🆕 Browser isolation - użyj opcji z konta
-        const browserOptions = accountManager.getBrowserOptions(scannerAccount, 'scanner', puppeteerOptions);
-        browser = await puppeteer.launch(browserOptions);
-        page = await browser.newPage();
+        // Pobierz ścieżkę profilu z account-managera (ta sama logika co poprzednio)
+        const browserProfilePath = accountManager.getBrowserOptions(scannerAccount, 'scanner', {}).userDataDir;
+
+        // 🆕 puppeteer-real-browser: natywny fix CDP Runtime.Enable leak
+        const result = await connect({
+            headless: false,
+            args: [
+                '--window-position=0,0',
+                '--start-maximized',
+                '--no-first-run',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+            ],
+            customConfig: {
+                chromePath: getChromePath(),
+                userDataDir: browserProfilePath,
+            },
+            connectOption: {
+                defaultViewport: null,
+            },
+            disableXvfb: true,
+        });
+        browser = result.browser;
+        page = result.page;
 
         // Aplikuj fingerprint urządzenia (timezone, jezyk, CDP evasion)
         await fingerprintManager.applyFingerprint(page);
 
-        // navigator.webdriver jest obslugiwany przez:
-        // 1. --disable-blink-features=AutomationControlled (natywnie w Chrome)
-        // 2. puppeteer-extra-plugin-stealth
-        // NIE usuwamy recznie z prototypu - brak chrome.runtime/webdriver = sygnal bota
+        // navigator.webdriver i CDP leak obsługuje puppeteer-real-browser natywnie.
 
         // ETAP 4.3: Rozgrzewka sesji PRZED nawigacja do grupy
         const warmupResult = await warmupSession(page);

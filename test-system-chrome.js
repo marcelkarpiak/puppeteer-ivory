@@ -1,25 +1,31 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { connect } = require('puppeteer-real-browser');
 const { getChromePath } = require('./lib/account-manager');
 
-puppeteer.use(StealthPlugin());
-
 (async () => {
-    console.log('Testing SYSTEM CHROME...');
+    console.log('Testing SYSTEM CHROME z puppeteer-real-browser...');
+    let browser;
     try {
-        const browser = await puppeteer.launch({
-            headless: false, // System Chrome usually works better headed for debugging
-            executablePath: getChromePath(),
-            args: ['--no-sandbox']
+        const result = await connect({
+            headless: false,
+            disableXvfb: true,
+            customConfig: {
+                chromePath: getChromePath(),
+            },
+            connectOption: { defaultViewport: null },
         });
+        browser = result.browser;
+        const page = result.page;
+
         console.log('✅ SYSTEM CHROME launched successfully!');
-        const page = await browser.newPage();
+        console.log('   Chrome path:', getChromePath());
         await page.goto('https://example.com');
         console.log('✅ Page loaded');
         await sleep(2000);
-        await browser.close();
+
     } catch (e) {
-        console.error('❌ SYSTEM CHROME failed:', e);
+        console.error('❌ SYSTEM CHROME failed:', e.message);
+    } finally {
+        if (browser) await browser.close();
     }
 })();
 
