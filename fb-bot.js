@@ -564,7 +564,7 @@ async function takePostScreenshot(postHandle, postId) {
             .getPublicUrl(filename);
 
         // Usun plik lokalny po uplaodzie
-        try { fs.unlinkSync(filepath); } catch (e) {}
+        try { fs.unlinkSync(filepath); } catch (e) { }
 
         return { success: true, screenshotUrl: urlData.publicUrl };
     } catch (err) {
@@ -624,13 +624,19 @@ async function scrapeFacebook(page, targetGroup = null) {
     // 2. Wykonaj losową ścieżkę nawigacji
     await performRandomNavigation(page);
 
-    // 3. Scrolluj żeby załadować posty
-    await humanScroll(page);
-    await sleep(2000);
+    // 3. Scrolluj kilka razy, zeby FB doladowal posty do DOM (leniwe ladowanie).
+    //    Jeden scroll laduje tylko 2-4 posty -> stad wczesniejsze "Znaleziono 2".
+    //    3-5 scrolli daje ~8-12 kandydatow. Tempo BEZ zmian - uzywamy istniejacych
+    //    pauz "na czytanie" wbudowanych w humanScroll (nic szybszego niz dotad).
+    const scrollPasses = 3 + Math.floor(Math.random() * 3); // 3-5
+    for (let i = 0; i < scrollPasses; i++) {
+        await humanScroll(page);
+        await sleep(800 + Math.random() * 1200); // 0.8-2.0s miedzy scrollami
+    }
 
-    // 3. Pobierz posty
+    // 3b. Pobierz posty (po doladowaniu feedu)
     const particleHandles = await page.$$('[role="article"]');
-    console.log(`   🔎 Znaleziono ${particleHandles.length} elementów (postów/reklam).`);
+    console.log(`   🔎 Znaleziono ${particleHandles.length} elementów (postów/reklam) po ${scrollPasses} scrollach.`);
 
     let processedCount = 0;
     // ETAP 6.2 + 7.3: Zroznicowane dlugosci sesji, ograniczone przez break-in
@@ -900,6 +906,10 @@ async function scrapeFacebook(page, targetGroup = null) {
  * Wykonuje losową ścieżkę nawigacji w grupie
  */
 async function performRandomNavigation(page) {
+    // UWAGA: Usunieto sciezki klikajace w "Czlonkow" i "Informacje" o grupie.
+    //   Powod: dla swiezego konta dodatkowe klikanie w podstrony = wieksza powierzchnia
+    //   wykrycia, a do tego goBack() zostawial slabo zaladowany feed -> skan zwracal 0
+    //   postow. Zostaja tylko sciezki oparte na scrollowaniu (bezpieczne, naturalne).
     const paths = [
         // Ścieżka 1: Przeglądaj posty
         async () => {
@@ -908,44 +918,7 @@ async function performRandomNavigation(page) {
             await sleep(humanDelay('readingTime'));
         },
 
-        // Ścieżka 2: Sprawdź członków
-        async () => {
-            console.log('   🛤️ Ścieżka: Sprawdzanie członków');
-            try {
-                const membersLink = await page.$('a[href*="members"]');
-                if (membersLink) {
-                    await humanClick(page, 'a[href*="members"]');
-                    await sleep(2000);
-                    await humanScroll(page);
-                    await sleep(1000);
-                    // Wróć do głównego feedu
-                    await page.goBack();
-                    await sleep(1000);
-                }
-            } catch (e) {
-                console.log('   ⚠️ Nie udało się sprawdzić członków');
-            }
-        },
-
-        // Ścieżka 3: Przeglądaj z zakładką "About"
-        async () => {
-            console.log('   🛤️ Ścieżka: Sprawdzanie informacji o grupie');
-            try {
-                const aboutLink = await page.$('a[href*="about"]');
-                if (aboutLink) {
-                    await humanClick(page, 'a[href*="about"]');
-                    await sleep(2000);
-                    await humanScroll(page);
-                    await sleep(1000);
-                    await page.goBack();
-                    await sleep(1000);
-                }
-            } catch (e) {
-                console.log('   ⚠️ Nie udało się sprawdzić informacji o grupie');
-            }
-        },
-
-        // Ścieżka 4: Losowe scrollowanie w różnych miejscach
+        // Ścieżka 2: Losowe scrollowanie w różnych miejscach
         async () => {
             console.log('   🛤️ Ścieżka: Losowe eksplorowanie');
             for (let i = 0; i < 3; i++) {
@@ -1119,12 +1092,19 @@ async function runSingleSession(targetGroup, coordinator = null) {
         const browserProfilePath = accountManager.getBrowserOptions(scannerAccount, 'scanner', {}).userDataDir;
 
         // 🆕 puppeteer-real-browser: natywny fix CDP Runtime.Enable leak
+        // ignoreAllFlags: true - pomijamy hardkodowane --no-sandbox z biblioteki
         const result = await connect({
             headless: false,
+            ignoreAllFlags: true,
             args: [
                 '--window-position=0,0',
                 '--start-maximized',
                 '--no-first-run',
+                // --disable-features=AutomationControlled: ukrywa webdriver tak jak robi to
+                // wewnetrznie puppeteer-real-browser, BEZ zoltego bannera "unsupported flag"
+                // (ktory wywoluje wariant --disable-blink-features). Banner = UI przegladarki,
+                // niewidoczny dla JS Facebooka, ale ta flaga nie generuje go w ogole.
+                '--disable-features=AutomationControlled',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
                 '--disable-renderer-backgrounding',
