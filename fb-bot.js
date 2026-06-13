@@ -515,7 +515,8 @@ async function expandTruncatedPost(postHandle) {
             const buttons = el.querySelectorAll('[role="button"], a, span');
             for (const btn of buttons) {
                 const text = btn.innerText.trim().toLowerCase();
-                if (text === 'see more' || text === 'zobacz więcej' || text === 'zobacz wiecej') {
+                if (text === 'see more' || text === 'zobacz więcej' || text === 'zobacz wiecej' ||
+                    text === 'wyświetl więcej' || text === 'wyswietl wiecej') {
                     btn.click();
                     return true;
                 }
@@ -574,6 +575,87 @@ async function takePostScreenshot(postHandle, postId) {
 }
 
 /**
+ * Zbiera AKTUALNIE wyrenderowane posty z feedu (te ktorych jeszcze nie widzielismy w tej sesji).
+ *   STRUKTURA FB (zweryfikowana): w widoku grupy POST to bezposrednie dziecko [role="feed"]
+ *   (zwykly <div>), a KOMENTARZE-podglady wewnatrz to [role="article"]. Czysty link do posta
+ *   czesto NIE istnieje - feed pokazuje tylko linki komentarzy. ALE ID posta jest w sciezce
+ *   kazdego takiego linku: /groups/{gid}/posts/{POST_ID}/?comment_id={CID}.
+ *   Feed jest WIRTUALIZOWANY (FB usuwa posty poza ekranem), dlatego zbieramy przyrostowo,
+ *   w trakcie scrollowania, deduplikujac po ID posta przez cala sesje (seenPostIds).
+ */
+async function collectRenderedPostCandidates(page, seenPostIds) {
+    const feedChildren = await page.$$('[role="feed"] > div');
+    const candidates = [];
+
+    for (const childHandle of feedChildren) {
+        const info = await childHandle.evaluate(el => {
+            // 1. ID posta: zlicz ID ze sciezek /posts/{id}/ i /permalink/{id}/ (rowniez z linkow komentarzy)
+            const idCounts = {};
+            let gid = '';
+            for (const a of el.querySelectorAll('a')) {
+                const m = a.href.match(/\/groups\/(\d+)\/(?:posts|permalink)\/(\d+)/);
+                if (m) { gid = m[1]; idCounts[m[2]] = (idCounts[m[2]] || 0) + 1; }
+            }
+            let postId = '';
+            let best = 0;
+            for (const [id, cnt] of Object.entries(idCounts)) {
+                if (cnt > best) { best = cnt; postId = id; }
+            }
+            if (!postId) return null;
+
+            // Helper: czysci tekst z powtarzanych alt-tekstow ikon ("Facebook") i nadmiarowych spacji.
+            const clean = (s) => (s || '').replace(/Facebook/g, '').replace(/[ \t]+/g, ' ').trim();
+
+            // 2. AUTOR: naglowek posta (h2/h3/h4) zawiera link do profilu/strony z nazwa.
+            let author = 'Nieznany';
+            let authorUrl = '';
+            const headerEl = el.querySelector('h2, h3, h4');
+            if (headerEl) {
+                const authorLink = Array.from(headerEl.querySelectorAll('a')).find(a => clean(a.innerText).length > 1);
+                if (authorLink) {
+                    author = clean(authorLink.innerText).split('·')[0].trim();
+                    authorUrl = authorLink.href.split('?')[0];
+                } else {
+                    author = clean(headerEl.innerText).split('·')[0].split('\n')[0].trim();
+                }
+            }
+
+            // 3. TRESC: element wiadomosci posta. Pomijamy komentarze ([role="article"]).
+            //    Preferuj dedykowany kontener wiadomosci; fallback = najdluzszy blok dir="auto" poza komentarzami.
+            let content = '';
+            const msgNode = el.querySelector('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"]');
+            if (msgNode) {
+                content = msgNode.innerText;
+            } else {
+                const blocks = Array.from(el.querySelectorAll('div[dir="auto"]'))
+                    .filter(d => !d.closest('[role="article"]'))   // wytnij tekst komentarzy
+                    .map(d => (d.innerText || '').trim())
+                    .filter(t => t.length > 0);
+                content = blocks.sort((a, b) => b.length - a.length)[0] || '';
+            }
+            content = clean(content);
+
+            return { postId, gid, author, authorUrl, content };
+        });
+
+        if (!info || !info.postId || seenPostIds.has(info.postId)) { await childHandle.dispose(); continue; }
+        if (!info.content || info.content.length < 15) { await childHandle.dispose(); continue; }
+
+        seenPostIds.add(info.postId);
+        candidates.push({
+            handle: childHandle,
+            externalId: info.postId,
+            url: `https://www.facebook.com/groups/${info.gid}/posts/${info.postId}/`,
+            author: info.author,
+            authorUrl: info.authorUrl || '',
+            content: info.content
+        });
+    }
+
+    return candidates;
+}
+
+/**
  * Logika scrapowania dla Facebooka
  */
 async function scrapeFacebook(page, targetGroup = null) {
@@ -624,20 +706,10 @@ async function scrapeFacebook(page, targetGroup = null) {
     // 2. Wykonaj losową ścieżkę nawigacji
     await performRandomNavigation(page);
 
-    // 3. Scrolluj kilka razy, zeby FB doladowal posty do DOM (leniwe ladowanie).
-    //    Jeden scroll laduje tylko 2-4 posty -> stad wczesniejsze "Znaleziono 2".
-    //    3-5 scrolli daje ~8-12 kandydatow. Tempo BEZ zmian - uzywamy istniejacych
-    //    pauz "na czytanie" wbudowanych w humanScroll (nic szybszego niz dotad).
-    const scrollPasses = 3 + Math.floor(Math.random() * 3); // 3-5
-    for (let i = 0; i < scrollPasses; i++) {
-        await humanScroll(page);
-        await sleep(800 + Math.random() * 1200); // 0.8-2.0s miedzy scrollami
-    }
-
-    // 3b. Pobierz posty (po doladowaniu feedu)
-    const particleHandles = await page.$$('[role="article"]');
-    console.log(`   🔎 Znaleziono ${particleHandles.length} elementów (postów/reklam) po ${scrollPasses} scrollach.`);
-
+    // 3. SKAN W TRAKCIE SCROLLOWANIA.
+    //    Feed FB jest wirtualizowany (posty poza ekranem sa usuwane z DOM), wiec NIE skanujemy
+    //    raz po kilku scrollach - tylko zbieramy i przetwarzamy posty przyrostowo, scroll po scrollu,
+    //    deduplikujac po ID posta przez cala sesje. Dzieki temu pokrywamy znacznie wiekszy kawalek feedu.
     let processedCount = 0;
     // ETAP 6.2 + 7.3: Zroznicowane dlugosci sesji, ograniczone przez break-in
     const breakInMaxPosts = breakInManager.getMaxPostsForDay();
@@ -649,12 +721,21 @@ async function scrapeFacebook(page, targetGroup = null) {
     // Resetuj statystyki Stateful Scanner
     statefulScanner.resetSessionStats();
 
-    // Przetwarzaj posty z Stateful Scanning
-    for (const [postIndex, postHandle] of particleHandles.entries()) {
-        if (processedCount >= maxPosts) {
-            console.log(`   🛑 Osiągnięto limit postów na sesję: ${maxPosts}.`);
-            break;
-        }
+    const seenPostIds = new Set();   // dedupe na cala sesje (feed jest wirtualizowany)
+    const maxScrolls = 18;           // gorny limit scrolli zeby sesja sie nie zapetlila
+    let scrollCount = 0;
+    let noNewStreak = 0;             // ile razy z rzedu scroll nie przyniosl nowych postow
+    let stopScanning = false;
+
+    while (processedCount < maxPosts && scrollCount <= maxScrolls && !stopScanning) {
+        // Zbierz aktualnie wyrenderowane, jeszcze nieprzetworzone posty
+        const candidates = await collectRenderedPostCandidates(page, seenPostIds);
+        if (candidates.length === 0) { noNewStreak++; } else { noNewStreak = 0; }
+
+        for (const candidate of candidates) {
+            if (processedCount >= maxPosts) break;
+            const postHandle = candidate.handle;
+            const postIndex = processedCount;
 
         // Losowe zachowanie bezczynności między postami
         await idleBehaviors.performIdleAction();
@@ -669,94 +750,19 @@ async function scrapeFacebook(page, targetGroup = null) {
         });
 
         try {
-            // Ekstrakcja danych w kontekście strony
-            const postData = await page.evaluate(el => {
-                // Helper do szukania tekstu wewnątrz elementu
-                const getText = (selector) => {
-                    const node = el.querySelector(selector);
-                    return node ? node.innerText : '';
-                };
+            // Tresc, autor, ID i URL mamy juz z etapu zbierania kandydatow
+            const postData = {
+                title: (candidate.content || '').substring(0, 50) + '...',
+                textContent: candidate.content,
+                url: candidate.url,
+                externalId: candidate.externalId,
+                author: candidate.author,
+                authorUrl: candidate.authorUrl,
+                postedAtRaw: ''
+            };
 
-                // --- AUTOR ---
-                let author = 'Nieznany';
-                let authorUrl = '';
-
-                // 1. Szukanie linku profilowego (najlepsza metoda)
-                const profileLink = Array.from(el.querySelectorAll('a')).find(a => {
-                    const href = a.href;
-                    const isProfile = (href.includes('/user/') || href.includes('/groups/')) &&
-                        !href.includes('/posts/') &&
-                        !href.includes('/permalink/') &&
-                        !href.includes('/photo');
-
-                    return isProfile && (a.innerText.length > 2);
-                });
-
-                if (profileLink) {
-                    authorUrl = profileLink.href;
-                    author = profileLink.innerText.split('\n')[0].trim();
-                }
-
-                // 2. Fallback: Szukanie w nagłówkach
-                if (author === 'Nieznany' || !author) {
-                    const headerStrong = el.querySelector('strong');
-                    if (headerStrong) {
-                        author = headerStrong.innerText;
-                    }
-                }
-
-                // 3. Fallback: Aria-labels
-                if (author === 'Nieznany') {
-                    const ariaElement = el.querySelector('[aria-label]');
-                    if (ariaElement && ariaElement.getAttribute('aria-label').length < 50) {
-                        author = ariaElement.getAttribute('aria-label');
-                    }
-                }
-
-                // 4. Fallback ostateczny: Pierwsza linia tekstu
-                if (author === 'Nieznany') {
-                    const contentText = el.innerText || '';
-                    const firstLine = contentText.split('\n')[0].trim();
-                    if (firstLine.length > 3 && firstLine.length < 30 && !/\d/.test(firstLine)) {
-                        author = firstLine;
-                    }
-                }
-
-                // --- TREŚĆ ---
-                const contentNode = el.querySelector('[data-ad-comet-preview="message"]');
-                const content = contentNode ? contentNode.innerText : (el.innerText || '');
-
-                // --- URL POSTA & DATA ---
-                const permalinkNode = Array.from(el.querySelectorAll('a')).find(a =>
-                    a.href.includes('/posts/') || a.href.includes('/permalink/')
-                );
-
-                const url = permalinkNode ? permalinkNode.href : '';
-                const postedAt = permalinkNode ? permalinkNode.innerText : new Date().toISOString();
-
-                // ID posta (z URL)
-                let externalId = '';
-                if (url) {
-                    const match = url.match(/\/posts\/(\d+)/) || url.match(/\/permalink\/(\d+)/);
-                    if (match) externalId = match[1];
-                }
-
-                return {
-                    title: content.substring(0, 50) + '...',
-                    textContent: content,
-                    url: url,
-                    externalId: externalId,
-                    author: author,
-                    authorUrl: authorUrl,
-                    postedAtRaw: postedAt
-                };
-            }, postHandle);
-
-            // Walidacja - czy to faktycznie post
+            // Walidacja - czy to faktycznie post z trescia
             if (!postData.textContent || postData.textContent.length < 5) {
-                continue;
-            }
-            if (!postData.url || !postData.externalId) {
                 continue;
             }
 
@@ -817,6 +823,7 @@ async function scrapeFacebook(page, targetGroup = null) {
 
             if (result.shouldStop) {
                 console.log(`   🛑 Zatrzymano skanowanie po ${result.consecutiveKnown} znanych postach`);
+                stopScanning = true;
                 break;
             }
 
@@ -828,7 +835,7 @@ async function scrapeFacebook(page, targetGroup = null) {
             // Social interactions: reakcje/porzucone komentarze na NIE-keywordowych postach
             const isKwMatch = matchKeywords(postData.textContent).matched;
             const interactionAction = socialInteractions.decideInteraction(
-                postIndex, particleHandles.length, isKwMatch
+                postIndex, maxPosts, isKwMatch
             );
             if (interactionAction === 'reaction') {
                 await socialInteractions.performReaction(postHandle);
@@ -853,7 +860,21 @@ async function scrapeFacebook(page, targetGroup = null) {
             console.log('   🔄 Symulacja zmiany taba...');
             await idleBehaviors.tabSwitch();
         }
-    }
+        } // koniec inner-for (przetwarzanie zebranych postow)
+
+        if (processedCount >= maxPosts || stopScanning) break;
+        if (noNewStreak >= 3) {
+            console.log('   🔚 Brak nowych postow po kilku scrollach - koniec feedu.');
+            break;
+        }
+
+        // Doscrolluj po kolejne posty (FB doladuje nastepne, poprzednie zwirtualizuje)
+        await humanScroll(page);
+        await sleep(800 + Math.random() * 1200);
+        scrollCount++;
+    } // koniec while (skan w trakcie scrollowania)
+
+    console.log(`   🔎 Przeskanowano ${processedCount} postow (scrolli: ${scrollCount}, unikalnych w feedzie: ${seenPostIds.size}).`);
 
     // Pokaż końcowe statystyki Stateful Scanner
     const sessionReport = statefulScanner.generateSessionReport(groupName);
@@ -1072,6 +1093,20 @@ async function runBot() {
 }
 
 /**
+ * Zabija osierocone procesy Chrome trzymajace dany profil (userDataDir).
+ * Bezpieczne: dopasowuje TYLKO nasz dedykowany profil, nie ruszy osobistego Chrome uzytkownika.
+ */
+function killStaleChrome(profilePath) {
+    try {
+        const { execSync } = require('child_process');
+        execSync(`pkill -f "user-data-dir=${profilePath}"`, { stdio: 'ignore' });
+        console.log('🧹 Posprzatano osierocony proces Chrome trzymajacy profil');
+    } catch (e) {
+        // pkill zwraca kod !=0 gdy nic nie znaleziono - to normalne, ignorujemy
+    }
+}
+
+/**
  * Uruchamia pojedynczą sesję scrapowania
  */
 async function runSingleSession(targetGroup, coordinator = null) {
@@ -1093,7 +1128,7 @@ async function runSingleSession(targetGroup, coordinator = null) {
 
         // 🆕 puppeteer-real-browser: natywny fix CDP Runtime.Enable leak
         // ignoreAllFlags: true - pomijamy hardkodowane --no-sandbox z biblioteki
-        const result = await connect({
+        const connectConfig = {
             headless: false,
             ignoreAllFlags: true,
             args: [
@@ -1117,7 +1152,23 @@ async function runSingleSession(targetGroup, coordinator = null) {
                 defaultViewport: null,
             },
             disableXvfb: true,
-        });
+        };
+
+        // Retry: ECONNREFUSED zwykle oznacza osierocony Chrome trzymajacy profil
+        // (np. po wczesniejszym crashu). Sprzatamy go i probujemy ponownie.
+        let result;
+        const maxConnectAttempts = 2;
+        for (let attempt = 1; attempt <= maxConnectAttempts; attempt++) {
+            try {
+                result = await connect(connectConfig);
+                break;
+            } catch (connErr) {
+                console.error(`⚠️ Polaczenie z Chrome nieudane (proba ${attempt}/${maxConnectAttempts}): ${connErr.message}`);
+                killStaleChrome(browserProfilePath);
+                if (attempt === maxConnectAttempts) throw connErr;
+                await sleep(3000);
+            }
+        }
         browser = result.browser;
         page = result.page;
 
@@ -1138,11 +1189,15 @@ async function runSingleSession(targetGroup, coordinator = null) {
             return;
         }
 
-        // Wejdź na stronę
-        console.log(`🔗 Nawigacja do: ${targetGroup.url}`);
+        // Wejdź na stronę - sortowanie wg NAJNOWSZYCH postow (chronologicznie).
+        // Domyslnie FB pokazuje "Najtrafniejsze" (te same popularne posty w kolko) - dla lead-genu
+        // chcemy swieze posty na gorze. Parametr sorting_setting=CHRONOLOGICAL = "Nowe posty".
+        const sep = targetGroup.url.includes('?') ? '&' : '?';
+        const groupUrl = `${targetGroup.url}${sep}sorting_setting=CHRONOLOGICAL`;
+        console.log(`🔗 Nawigacja do: ${groupUrl}`);
 
         // ETAP 6.5: Referrer chain - nawigacja "z Facebooka" (warmup umieszcza nas na facebook.com)
-        await page.goto(targetGroup.url, { waitUntil: 'networkidle2', timeout: 60000, referer: 'https://www.facebook.com/' });
+        await page.goto(groupUrl, { waitUntil: 'networkidle2', timeout: 60000, referer: 'https://www.facebook.com/' });
 
         // Losowe opóźnienie "rozruchowe"
         await sleep(humanDelay('afterPageLoad'));
